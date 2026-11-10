@@ -130,12 +130,25 @@ jobs:
             cp -R assets _site/
           fi
 
-          cp data/latest/t2m.json _site/data/latest/
+          cp data/latest/*.json _site/data/latest/
 
           touch _site/.nojekyll
 
-          echo "Prepared public website:"
-          find _site -type f
+          echo "Checking public atmospheric products:"
+          ls -lh _site/data/latest/
+
+          test -f _site/data/latest/manifest.json
+
+          for variable in \
+            t2m prate pwat \
+            u850 v850 u250 v250 \
+            wspd850 wspd250 z500 omega500
+          do
+            test -f "_site/data/latest/${variable}.json"
+          done
+
+          echo "SUCCESS: All 12 JSON products ready"
+
 
       # ----------------------------------------------------
       # Upload GitHub Pages artifact
