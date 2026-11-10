@@ -71,6 +71,10 @@ cache/
 .vscode/
 .idea/
 
+# Generated visualization products
+data/latest/
+_site/
+
 # ------------------------------------------------------------
 # IMPORTANT
 # ------------------------------------------------------------
