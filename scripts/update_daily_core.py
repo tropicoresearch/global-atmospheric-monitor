@@ -3,14 +3,11 @@
 # -*- coding: utf-8 -*-
 
 """
-TRÓPICO — Global Atmospheric Monitor
-Daily NOAA CPC CORe 2-m temperature anomalies
+TRÓPICO | Global Atmospheric Monitor
+Daily NOAA CPC CORe anomalies (1991–2020 climatology).
 
 Author: Alejandro Jaramillo-Moreno
-Instituto de Ciencias de la Atmósfera y
-Cambio Climático, UNAM
-
-Reference climatology: 1991–2020
+Instituto de Ciencias de la Atmósfera y Cambio Climático, UNAM
 """
 
 from calendar import monthrange
@@ -33,320 +30,384 @@ from eccodes import (
     codes_release,
 )
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 
 # ==========================================================
 # 1. SETTINGS
 # ==========================================================
 
 ROOT = Path(__file__).resolve().parent.parent
-
-OUTPUT = ROOT / "data" / "latest" / "t2m.json"
+OUTPUT_DIR = ROOT / "data" / "latest"
 
 FOLDER_ID = "1iW30G3cAaIZceu2geZ0E9kg26Wlx3zE5"
 
-BASE_URL = (
-    "https://storage.googleapis.com/"
-    "noaa-nws-ncep-core/grib/day/flx"
+DRIVE_URL = (
+    "https://www.googleapis.com/drive/v3/files"
 )
 
-DRIVE_API = "https://www.googleapis.com/drive/v3/files"
+NOAA_URL = (
+    "https://storage.googleapis.com/"
+    "noaa-nws-ncep-core/grib/day"
+)
 
-TOKEN = os.environ.get("GOOGLE_ACCESS_TOKEN", "")
+TOKEN = os.environ.get(
+    "GOOGLE_ACCESS_TOKEN", ""
+)
+
+LOOKBACK_DAYS = 10
 
 if not TOKEN:
     raise RuntimeError(
-        "Missing GOOGLE_ACCESS_TOKEN. "
-        "Run through GitHub Actions."
+        "GOOGLE_ACCESS_TOKEN is missing"
     )
+
+
+# ==========================================================
+# 2. VARIABLE CATALOG
+# ==========================================================
+
+# Original fields:
+# group, GRIB parameter, level, timing
+
+SPECS = {
+
+    "t2m": (
+        "flx", "TMP",
+        r"^2\s*m\s*above\s*(ground|gnd)$",
+        r"\d+@3\s*hour\s*ave\(anl\)"
+    ),
+
+    "prate": (
+        "flx", "PRATE",
+        r"^(surface|sfc)$",
+        None
+    ),
+
+    "pwat": (
+        "flx", "PWAT",
+        r"(atmos\s+col|entire\s+atmosphere)",
+        None
+    ),
+
+    "u850": (
+        "pgb", "UGRD",
+        r"^850\s*(mb|hPa)$",
+        None
+    ),
+
+    "v850": (
+        "pgb", "VGRD",
+        r"^850\s*(mb|hPa)$",
+        None
+    ),
+
+    "u250": (
+        "pgb", "UGRD",
+        r"^250\s*(mb|hPa)$",
+        None
+    ),
+
+    "v250": (
+        "pgb", "VGRD",
+        r"^250\s*(mb|hPa)$",
+        None
+    ),
+
+    "z500": (
+        "pgb", "HGT",
+        r"^500\s*(mb|hPa)$",
+        None
+    ),
+
+    "omega500": (
+        "pgb", "VVEL",
+        r"^500\s*(mb|hPa)$",
+        None
+    ),
+}
+
+
+DERIVED = {
+
+    "wspd850": ("u850", "v850"),
+
+    "wspd250": ("u250", "v250"),
+
+}
+
+
+# Visualization units, scaling and decimal precision.
+# Rounding is used only when exporting JSON.
+
+DISPLAY = {
+
+    "t2m": ("degC", 1.0, 2),
+
+    "prate": ("mm day-1", 86400.0, 2),
+
+    "pwat": ("mm", 1.0, 2),
+
+    "u850": ("m s-1", 1.0, 2),
+    "v850": ("m s-1", 1.0, 2),
+
+    "u250": ("m s-1", 1.0, 2),
+    "v250": ("m s-1", 1.0, 2),
+
+    "wspd850": ("m s-1", 1.0, 2),
+    "wspd250": ("m s-1", 1.0, 2),
+
+    "z500": ("gpm", 1.0, 2),
+
+    "omega500": ("Pa s-1", 1.0, 5),
+
+}
+
+
+# ==========================================================
+# 3. HTTP SESSION
+# ==========================================================
 
 session = requests.Session()
 
+retry = Retry(
+    total=4,
+    backoff_factor=1,
+    status_forcelist=[
+        429, 500, 502, 503, 504
+    ],
+)
+
+session.mount(
+    "https://",
+    HTTPAdapter(max_retries=retry)
+)
+
 session.headers.update({
-    "User-Agent": "TROPICO-Global-Atmospheric-Monitor/1.0"
+    "User-Agent":
+        "TROPICO-Global-Atmospheric-Monitor/1.0"
 })
 
 
 # ==========================================================
-# 2. GOOGLE DRIVE ACCESS
+# 4. NOAA DAILY GRIB INVENTORY
 # ==========================================================
 
-def drive_child(parent_id, filename):
+def inventory_for_day(group, date):
+
+    stem = (
+        f"{NOAA_URL}/{group}/"
+        f"{date.year}/{date.month:02d}/"
+        f"{group}.{date:%Y%m%d}"
+    )
 
     response = session.get(
-        DRIVE_API,
-        params={
-            "q": (
-                f"'{parent_id}' in parents "
-                f"and name = '{filename}' "
-                "and trashed = false"
-            ),
-            "fields": "nextPageToken,files(id,name,mimeType)",
-            "pageSize": 100,
-        },
-        headers={
-            "Authorization": f"Bearer {TOKEN}"
-        },
-        timeout=60,
+        stem + ".idx",
+        timeout=(20, 90)
     )
+
+    if response.status_code == 404:
+        return None
 
     response.raise_for_status()
 
-    result = response.json()
-    items = result.get("files", [])
+    records = []
 
-    if result.get("nextPageToken") or len(items) != 1:
+    for line in response.text.splitlines():
+
+        parts = line.split(":")
+
+        if len(parts) < 5:
+            continue
+
+        records.append({
+            "offset": int(parts[1]),
+            "parameter": parts[3].strip(),
+            "level": parts[4].strip(),
+            "timing": (
+                parts[5].strip()
+                if len(parts) > 5
+                else ""
+            ),
+        })
+
+    if (
+        not records
+        or any(
+            b["offset"] <= a["offset"]
+            for a, b in zip(
+                records, records[1:]
+            )
+        )
+    ):
         raise ValueError(
-            f"Expected one Drive item named {filename!r}; "
-            f"found {len(items)}"
+            f"Invalid {group} inventory for {date}"
         )
 
-    return items[0]["id"]
+    return stem + ".grb", records
 
 
-def download_climatology(month, path):
+def match_record(records, name):
 
-    folder_id = drive_child(FOLDER_ID, "t2m")
-    file_id = drive_child(folder_id, f"{month:02d}.nc")
+    _, parameter, level, timing = SPECS[name]
 
-    with session.get(
-        f"{DRIVE_API}/{file_id}",
-        params={"alt": "media"},
-        headers={
-            "Authorization": f"Bearer {TOKEN}"
-        },
-        stream=True,
-        timeout=120,
-    ) as response:
+    matches = [
 
-        response.raise_for_status()
+        i for i, record in enumerate(records)
 
-        with path.open("wb") as output:
-            for chunk in response.iter_content(
-                chunk_size=1024 * 1024
-            ):
-                if chunk:
-                    output.write(chunk)
+        if record["parameter"] == parameter
 
-    print(
-        f"Climatology: t2m/{month:02d}.nc "
-        f"({path.stat().st_size:,} bytes)"
+        and re.search(
+            level,
+            record["level"],
+            re.IGNORECASE
+        )
+
+        and (
+            timing is None
+            or re.search(
+                timing,
+                record["timing"],
+                re.IGNORECASE
+            )
+        )
+    ]
+
+    if len(matches) != 1:
+        raise ValueError(
+            f"Expected one {name} GRIB record, "
+            f"got {len(matches)}"
+        )
+
+    i = matches[0]
+
+    end = (
+        records[i + 1]["offset"] - 1
+        if i + 1 < len(records)
+        else None
     )
 
-
-def climatology_for_day(path, month, day):
-
-    with xr.open_dataset(
-        path, decode_times=False
-    ) as ds:
-
-        if (
-            "t2m" not in ds
-            or "lat" not in ds.coords
-            or "lon" not in ds.coords
-        ):
-            raise ValueError(
-                "Unexpected climatology structure"
-            )
-
-        da = ds["t2m"]
-
-        day_dims = [
-            dim for dim in da.dims
-            if dim not in ("lat", "lon")
-        ]
-
-        if len(day_dims) != 1:
-            raise ValueError(
-                f"Expected daily climatology: {da.dims}"
-            )
-
-        day_dim = day_dims[0]
-
-        expected_days = monthrange(2001, month)[1]
-
-        if da.sizes[day_dim] != expected_days:
-            raise ValueError(
-                f"Climatology month {month:02d}: "
-                f"expected {expected_days} days, "
-                f"got {da.sizes[day_dim]}"
-            )
-
-        field = da.isel({
-            day_dim: day - 1
-        }).transpose("lat", "lon")
-
-        values = np.asarray(
-            field.values, dtype="float32"
-        )
-
-        lat = np.asarray(ds["lat"].values)
-        lon = np.asarray(ds["lon"].values)
-
-        if (
-            values.shape != (256, 512)
-            or not np.isfinite(values).any()
-        ):
-            raise ValueError(
-                "Invalid climatology grid or data"
-            )
-
-        return values, lat, lon
+    return records[i]["offset"], end
 
 
-# ==========================================================
-# 3. FIND LATEST NOAA DAILY FIELD
-# ==========================================================
-
-def find_latest_t2m():
+def latest_complete_day():
 
     today = datetime.now(timezone.utc).date()
 
-    for lag in range(1, 11):
+    for lag in range(1, LOOKBACK_DAYS + 1):
 
-        date = today - timedelta(days=lag)
+        day = today - timedelta(days=lag)
 
-        stem = (
-            f"{BASE_URL}/"
-            f"{date.year}/{date.month:02d}/"
-            f"flx.{date:%Y%m%d}"
-        )
+        inventories = {
 
-        response = session.get(
-            stem + ".idx",
-            timeout=60
-        )
+            group: inventory_for_day(group, day)
 
-        if response.status_code == 404:
-            print(f"{date}: not yet available")
-            continue
-
-        response.raise_for_status()
-
-        records = []
-
-        for line in response.text.splitlines():
-
-            parts = line.split(":")
-
-            if len(parts) < 6:
-                continue
-
-            records.append({
-                "offset": int(parts[1]),
-                "parameter": parts[3].strip(),
-                "level": parts[4].strip(),
-                "timing": parts[5].strip(),
-            })
-
-        if not records:
-            raise ValueError(
-                f"Empty NOAA inventory for {date}"
-            )
+            for group in ("flx", "pgb")
+        }
 
         if any(
-            b["offset"] <= a["offset"]
-            for a, b in zip(records, records[1:])
+            item is None
+            for item in inventories.values()
         ):
-            raise ValueError(
-                f"Invalid NOAA inventory for {date}"
+
+            print(
+                f"{day}: flx/pgb incomplete "
+                "(missing inventory)"
             )
 
-        candidates = [
-            i for i, record in enumerate(records)
-            if record["parameter"] == "TMP"
-            and re.fullmatch(
-                r"2\s*m\s*above\s*(ground|gnd)",
-                record["level"]
-            )
-            and re.search(
-                r"\d+@3\s*hour\s*ave\(anl\)",
-                record["timing"]
-            )
-        ]
+            continue
 
-        if len(candidates) != 1:
-            raise ValueError(
-                f"Expected one daily-mean t2m record "
-                f"for {date}; found {len(candidates)}"
-            )
+        try:
 
-        index = candidates[0]
+            selections = {
 
-        start = records[index]["offset"]
+                name: match_record(
+                    inventories[spec[0]][1],
+                    name
+                )
 
-        end = (
-            records[index + 1]["offset"] - 1
-            if index + 1 < len(records)
-            else None
+                for name, spec in SPECS.items()
+            }
+
+        except ValueError as exc:
+
+            print(f"{day}: {exc}")
+            continue
+
+        print(
+            f"Selected common NOAA CORe date: {day}"
         )
 
-        print(f"Latest CORe t2m date: {date}")
-
-        return date, stem + ".grb", start, end
+        return day, inventories, selections
 
     raise RuntimeError(
-        "No daily CORe data found in the last 10 days"
+        "No common complete date in the last "
+        f"{LOOKBACK_DAYS} days"
     )
 
 
-def download_t2m_field(url, start, end, path):
+# ==========================================================
+# 5. GRIB DOWNLOAD AND DECODING
+# ==========================================================
 
-    byte_range = (
+def download_grib(url, start, end, path):
+
+    limit = (
         f"bytes={start}-{end}"
         if end is not None
         else f"bytes={start}-"
     )
 
-    response = session.get(
+    with session.get(
         url,
-        headers={"Range": byte_range},
-        timeout=120
-    )
+        headers={"Range": limit},
+        stream=True,
+        timeout=(20, 120)
+    ) as response:
 
-    if response.status_code != 206:
-        raise RuntimeError(
-            "Expected partial NOAA download "
-            f"(HTTP 206), got {response.status_code}"
+        if response.status_code != 206:
+            raise RuntimeError(
+                "Expected HTTP 206; got "
+                f"{response.status_code}: {url}"
+            )
+
+        with path.open("wb") as handle:
+
+            for chunk in response.iter_content(
+                chunk_size=1024 * 1024
+            ):
+
+                if chunk:
+                    handle.write(chunk)
+
+    if path.stat().st_size < 20:
+        raise ValueError(
+            f"Empty GRIB message: {url}"
         )
 
-    response.raise_for_status()
 
-    path.write_bytes(response.content)
+def decode_grib(path):
 
-    if path.stat().st_size == 0:
-        raise ValueError("Empty GRIB message")
+    with path.open("rb") as handle:
 
-    print(
-        f"NOAA t2m message: "
-        f"{path.stat().st_size:,} bytes"
-    )
-
-
-# ==========================================================
-# 4. DECODE NOAA GRIB
-# ==========================================================
-
-def decode_t2m(path):
-
-    with path.open("rb") as stream:
-
-        gid = codes_grib_new_from_file(stream)
+        gid = codes_grib_new_from_file(
+            handle
+        )
 
         if gid is None:
             raise ValueError(
-                "Could not decode NOAA GRIB"
+                "Could not decode NOAA GRIB message"
             )
 
         try:
+
             ni = int(codes_get(gid, "Ni"))
             nj = int(codes_get(gid, "Nj"))
 
-            if (nj, ni) != (256, 512):
-                raise ValueError(
-                    f"Unexpected NOAA grid: {(nj, ni)}"
-                )
-
-            units = str(codes_get(gid, "units"))
+            units = str(
+                codes_get(gid, "units")
+            )
 
             lat2d = codes_get_array(
                 gid, "latitudes"
@@ -355,7 +416,7 @@ def decode_t2m(path):
             lon2d = (
                 codes_get_array(
                     gid, "longitudes"
-                ).reshape(nj, ni) % 360.0
+                ).reshape(nj, ni) % 360
             )
 
             values = codes_get_values(
@@ -365,25 +426,27 @@ def decode_t2m(path):
         finally:
             codes_release(gid)
 
-    if units != "K":
+    if (nj, ni) != (256, 512):
         raise ValueError(
-            f"Expected kelvin, got {units!r}"
+            f"Unexpected NOAA grid {(nj, ni)}"
         )
 
     if not np.allclose(
-        lat2d, lat2d[:, :1],
-        rtol=0, atol=1e-4
+        lat2d,
+        lat2d[:, :1],
+        atol=1e-4
     ):
         raise ValueError(
-            "Latitude grid is not separable"
+            "NOAA latitude grid is not separable"
         )
 
     if not np.allclose(
-        lon2d, lon2d[:1, :],
-        rtol=0, atol=1e-4
+        lon2d,
+        lon2d[:1, :],
+        atol=1e-4
     ):
         raise ValueError(
-            "Longitude grid is not separable"
+            "NOAA longitude grid is not separable"
         )
 
     values = np.where(
@@ -393,7 +456,7 @@ def decode_t2m(path):
         np.nan
     ).astype("float32")
 
-    da = xr.DataArray(
+    field = xr.DataArray(
         values,
         dims=("lat", "lon"),
         coords={
@@ -402,165 +465,530 @@ def decode_t2m(path):
         }
     )
 
-    da = da.sortby("lat").sortby("lon")
+    field = (
+        field.sortby("lat")
+        .sortby("lon")
+    )
+
+    if not np.isfinite(field.values).any():
+        raise ValueError(
+            "NOAA field contains no finite values"
+        )
 
     return (
-        da.values,
-        da.lat.values,
-        da.lon.values
+        field.values,
+        field.lat.values,
+        field.lon.values,
+        units
     )
 
 
 # ==========================================================
-# 5. PROCESS DAILY TEMPERATURE ANOMALY
+# 6. GOOGLE DRIVE CLIMATOLOGIES
 # ==========================================================
 
-print("=" * 60)
-print("TRÓPICO - GLOBAL ATMOSPHERIC MONITOR")
-print("NOAA CPC CORe - DAILY T2M ANOMALY")
-print("=" * 60)
+def drive_child(parent, name):
 
-date, grib_url, byte_start, byte_end = (
-    find_latest_t2m()
-)
-
-with TemporaryDirectory() as directory:
-
-    work = Path(directory)
-
-    grib_file = work / "t2m.grb"
-
-    download_t2m_field(
-        grib_url,
-        byte_start,
-        byte_end,
-        grib_file
+    response = session.get(
+        DRIVE_URL,
+        params={
+            "q": (
+                f"'{parent}' in parents "
+                f"and name = '{name}' "
+                "and trashed = false"
+            ),
+            "fields": (
+                "nextPageToken,"
+                "files(id,name,mimeType)"
+            ),
+            "pageSize": 100,
+        },
+        headers={
+            "Authorization": f"Bearer {TOKEN}"
+        },
+        timeout=(20, 90),
     )
 
-    observed, lat, lon = decode_t2m(grib_file)
+    response.raise_for_status()
 
-    reference_dates = [
-        (date.month, date.day)
-    ]
+    result = response.json()
 
-    # Leap-day climatology
-    if (date.month, date.day) == (2, 29):
-        reference_dates = [
-            (2, 28),
-            (3, 1)
-        ]
+    files = result.get("files", [])
 
-    references = []
-
-    for month, day in reference_dates:
-
-        nc_file = work / f"{month:02d}.nc"
-
-        download_climatology(
-            month, nc_file
+    if (
+        result.get("nextPageToken")
+        or len(files) != 1
+    ):
+        raise ValueError(
+            "Expected one Google Drive child "
+            f"{name!r}, got {len(files)}"
         )
 
-        reference, clat, clon = (
-            climatology_for_day(
-                nc_file, month, day
-            )
+    return files[0]["id"]
+
+
+def download_drive_file(file_id, path):
+
+    with session.get(
+        f"{DRIVE_URL}/{file_id}",
+        params={"alt": "media"},
+        headers={
+            "Authorization": f"Bearer {TOKEN}"
+        },
+        stream=True,
+        timeout=(20, 120),
+    ) as response:
+
+        response.raise_for_status()
+
+        with path.open("wb") as handle:
+
+            for chunk in response.iter_content(
+                chunk_size=1024 * 1024
+            ):
+
+                if chunk:
+                    handle.write(chunk)
+
+    if path.stat().st_size == 0:
+        raise ValueError(
+            f"Empty Drive file: {file_id}"
         )
 
-        if not (
-            np.allclose(
-                lat, clat, rtol=0, atol=1e-5
-            )
-            and np.allclose(
-                lon, clon, rtol=0, atol=1e-5
-            )
+
+def read_reference(path, name, month, day):
+
+    with xr.open_dataset(
+        path,
+        decode_times=False
+    ) as ds:
+
+        if (
+            name not in ds
+            or "lat" not in ds.coords
+            or "lon" not in ds.coords
         ):
             raise ValueError(
-                "NOAA and climatology grids differ"
+                "Invalid climatology structure "
+                f"for {name}"
             )
 
-        references.append(reference)
+        da = ds[name]
 
-    if len(references) == 1:
-        climatology = references[0]
+        day_dims = [
+            dim for dim in da.dims
+            if dim not in ("lat", "lon")
+        ]
 
-    else:
-        climatology = (
-            (
-                references[0].astype("float64")
-                + references[1].astype("float64")
-            ) / 2.0
-        ).astype("float32")
+        expected_days = monthrange(
+            2001, month
+        )[1]
 
-    # K - K = degC (temperature anomaly)
-    anomaly = (
-        observed.astype("float32")
-        - climatology
-    )
+        if (
+            len(day_dims) != 1
+            or da.sizes[day_dims[0]]
+            != expected_days
+        ):
+            raise ValueError(
+                "Unexpected daily calendar for "
+                f"{name}/{month:02d}.nc"
+            )
 
-    valid = np.isfinite(anomaly)
+        field = da.isel({
+            day_dims[0]: day - 1
+        }).transpose("lat", "lon")
 
-    if not valid.any():
-        raise ValueError(
-            "No finite temperature anomalies"
+        values = np.asarray(
+            field.values,
+            dtype="float32"
         )
 
-    print(
-        f"Valid grid points: "
-        f"{valid.sum():,}/{anomaly.size:,}"
+        if (
+            values.shape != (256, 512)
+            or not np.isfinite(values).any()
+        ):
+            raise ValueError(
+                f"Invalid climatology field for {name}"
+            )
+
+        return (
+            values,
+            ds.lat.values,
+            ds.lon.values,
+            str(da.attrs.get("units", ""))
+        )
+
+
+# ==========================================================
+# 7. VALIDATION AND JSON OUTPUT
+# ==========================================================
+
+def validate_grid(
+    lat, lon,
+    reference_lat, reference_lon
+):
+
+    if not (
+        np.allclose(
+            lat, reference_lat,
+            rtol=0, atol=1e-5
+        )
+        and np.allclose(
+            lon, reference_lon,
+            rtol=0, atol=1e-5
+        )
+    ):
+        raise ValueError(
+            "NOAA and climatology grids differ"
+        )
+
+
+def write_json(path, content):
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True
     )
 
-    print(
-        f"Anomaly min/max: "
-        f"{np.nanmin(anomaly):+.2f}/"
-        f"{np.nanmax(anomaly):+.2f} degC"
+    temporary = path.with_suffix(
+        path.suffix + ".tmp"
     )
-
-    # Visualization-ready JSON.
-    # Rounding is applied only to this web product.
-    result = {
-        "variable": "t2m",
-        "date": date.isoformat(),
-        "units": "degC",
-        "source": "NOAA CPC CORe daily ensemble mean",
-        "reference_period": "1991-2020",
-        "reference_smoothing": (
-            "31-day centered circular smoothing"
-        ),
-        "grid": "native CORe Gaussian grid",
-        "shape": list(anomaly.shape),
-        "lat": [
-            round(float(x), 6) for x in lat
-        ],
-        "lon": [
-            round(float(x), 6) for x in lon
-        ],
-        "anomaly": [
-            [
-                round(float(v), 2)
-                if np.isfinite(v)
-                else None
-                for v in row
-            ]
-            for row in anomaly
-        ]
-    }
-
-    OUTPUT.parent.mkdir(
-        parents=True, exist_ok=True
-    )
-
-    temporary = OUTPUT.with_suffix(".json.tmp")
 
     with temporary.open(
-        "w", encoding="utf-8"
-    ) as output:
+        "w",
+        encoding="utf-8"
+    ) as handle:
+
         json.dump(
-            result,
-            output,
+            content,
+            handle,
             separators=(",", ":"),
             allow_nan=False
         )
 
-    temporary.replace(OUTPUT)
+    temporary.replace(path)
 
-    print(f"SUCCESS: {OUTPUT}")
+
+# ==========================================================
+# 8. MAIN PROCESSING
+# ==========================================================
+
+print("=" * 62)
+print("TRÓPICO — GLOBAL ATMOSPHERIC MONITOR")
+print("NOAA CPC CORe — DAILY ATMOSPHERIC ANOMALIES")
+print("=" * 62)
+
+date, inventories, selections = (
+    latest_complete_day()
+)
+
+with TemporaryDirectory() as tmpdir:
+
+    work = Path(tmpdir)
+
+    observed = {}
+    source_units = {}
+
+    lat = None
+    lon = None
+
+    # ------------------------------------------------------
+    # Download 9 original NOAA fields
+    # ------------------------------------------------------
+
+    for name, spec in SPECS.items():
+
+        group = spec[0]
+
+        url, _ = inventories[group]
+
+        start, end = selections[name]
+
+        grib_path = work / f"{name}.grb"
+
+        download_grib(
+            url,
+            start,
+            end,
+            grib_path
+        )
+
+        values, field_lat, field_lon, units = (
+            decode_grib(grib_path)
+        )
+
+        if lat is None:
+
+            lat = field_lat.copy()
+            lon = field_lon.copy()
+
+        else:
+
+            validate_grid(
+                lat, lon,
+                field_lat, field_lon
+            )
+
+        observed[name] = values
+        source_units[name] = units
+
+        print(
+            f"NOAA {name:9s}: "
+            f"{grib_path.stat().st_size:>9,} bytes "
+            f"| {units}"
+        )
+
+        grib_path.unlink()
+
+    # ------------------------------------------------------
+    # Derived daily-mean horizontal wind speeds
+    # ------------------------------------------------------
+
+    for name, (u, v) in DERIVED.items():
+
+        observed[name] = np.hypot(
+            observed[u],
+            observed[v]
+        ).astype("float32")
+
+        source_units[name] = source_units[u]
+
+    # ------------------------------------------------------
+    # Climatological day selection
+    # ------------------------------------------------------
+
+    reference_dates = (
+
+        [(2, 28), (3, 1)]
+
+        if (date.month, date.day) == (2, 29)
+
+        else [(date.month, date.day)]
+    )
+
+    outputs = []
+
+    # ------------------------------------------------------
+    # Generate all 11 anomaly products
+    # ------------------------------------------------------
+
+    for name in DISPLAY:
+
+        drive_folder = drive_child(
+            FOLDER_ID,
+            name
+        )
+
+        climatologies = []
+
+        reference_units = None
+
+        for month, day in reference_dates:
+
+            nc_path = (
+                work / f"{name}_{month:02d}.nc"
+            )
+
+            drive_file = drive_child(
+                drive_folder,
+                f"{month:02d}.nc"
+            )
+
+            download_drive_file(
+                drive_file,
+                nc_path
+            )
+
+            (
+                reference,
+                ref_lat,
+                ref_lon,
+                units
+            ) = read_reference(
+                nc_path,
+                name,
+                month,
+                day
+            )
+
+            validate_grid(
+                lat, lon,
+                ref_lat, ref_lon
+            )
+
+            if reference_units is None:
+
+                reference_units = units
+
+            elif units != reference_units:
+
+                raise ValueError(
+                    "Inconsistent climatology units "
+                    f"for {name}"
+                )
+
+            climatologies.append(
+                reference
+            )
+
+            print(
+                f"Drive {name:9s}/{month:02d}.nc: "
+                f"{nc_path.stat().st_size:>9,} bytes"
+            )
+
+            nc_path.unlink()
+
+        # --------------------------------------------------
+        # Check original-variable units
+        # --------------------------------------------------
+
+        if (
+            name in SPECS
+            and reference_units
+            and source_units[name] != reference_units
+        ):
+            raise ValueError(
+                f"Units mismatch for {name}: "
+                f"NOAA {source_units[name]!r}, "
+                f"climatology {reference_units!r}"
+            )
+
+        # --------------------------------------------------
+        # Leap-day reference interpolation
+        # --------------------------------------------------
+
+        if len(climatologies) == 1:
+
+            reference = climatologies[0]
+
+        else:
+
+            reference = (
+                (
+                    climatologies[0].astype("float64")
+                    + climatologies[1].astype("float64")
+                ) / 2
+            ).astype("float32")
+
+        # --------------------------------------------------
+        # Calculate anomalies at native resolution
+        # --------------------------------------------------
+
+        units, scale, digits = DISPLAY[name]
+
+        anomalies = (
+            observed[name] - reference
+        ).astype("float32")
+
+        if scale != 1.0:
+
+            anomalies *= np.float32(
+                scale
+            )
+
+        good = np.isfinite(
+            anomalies
+        )
+
+        if not good.any():
+
+            raise ValueError(
+                "No valid anomaly values "
+                f"for {name}"
+            )
+
+        # --------------------------------------------------
+        # JSON for web visualization
+        # --------------------------------------------------
+
+        output = (
+            OUTPUT_DIR / f"{name}.json"
+        )
+
+        write_json(
+            output,
+            {
+                "variable": name,
+
+                "date": date.isoformat(),
+
+                "units": units,
+
+                "source": (
+                    "NOAA CPC CORe "
+                    "daily ensemble mean"
+                ),
+
+                "reference_period": "1991-2020",
+
+                "reference_smoothing": (
+                    "31-day centered "
+                    "circular smoothing"
+                ),
+
+                "grid": (
+                    "native CORe Gaussian grid"
+                ),
+
+                "shape": [256, 512],
+
+                "precision_decimals": digits,
+
+                "lat": [
+                    round(float(x), 6)
+                    for x in lat
+                ],
+
+                "lon": [
+                    round(float(x), 6)
+                    for x in lon
+                ],
+
+                "anomaly": [
+                    [
+                        round(float(x), digits)
+                        if np.isfinite(x)
+                        else None
+                        for x in row
+                    ]
+                    for row in anomalies
+                ],
+            }
+        )
+
+        outputs.append(name)
+
+        print(
+            f"SUCCESS {name:9s}: "
+            f"{int(good.sum()):,} cells | "
+            f"min {float(np.nanmin(anomalies)):+.5f} | "
+            f"max {float(np.nanmax(anomalies)):+.5f} "
+            f"{units}"
+        )
+
+    # ------------------------------------------------------
+    # Manifest for the future variable selector
+    # ------------------------------------------------------
+
+    write_json(
+        OUTPUT_DIR / "manifest.json",
+        {
+            "date": date.isoformat(),
+
+            "reference_period": "1991-2020",
+
+            "variables": outputs,
+
+            "generated_utc": (
+                datetime.now(
+                    timezone.utc
+                ).isoformat()
+            ),
+        }
+    )
+
+print(
+    "SUCCESS: generated "
+    f"{len(DISPLAY)} variable files "
+    "and manifest.json"
+)

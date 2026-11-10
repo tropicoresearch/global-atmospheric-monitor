@@ -1,0 +1,114 @@
+
+name: Test All Atmospheric Variables
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-all-variables:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy \
+            xarray \
+            netCDF4 \
+            eccodes \
+            requests
+
+      - name: Authenticate with Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: tropico-atmospheric-monitor
+          workload_identity_provider: projects/490419539543/locations/global/workloadIdentityPools/gam-github-pool/providers/github-actions
+          service_account: gam-climatology-reader@tropico-atmospheric-monitor.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+          create_credentials_file: false
+
+      - name: Process all daily atmospheric variables
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          python scripts/update_daily_core.py
+
+      - name: Validate generated products
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          directory = Path("data/latest")
+
+          expected = {
+              "t2m", "prate", "pwat",
+              "u850", "v850",
+              "u250", "v250",
+              "wspd850", "wspd250",
+              "z500", "omega500",
+          }
+
+          with (directory / "manifest.json").open() as f:
+              manifest = json.load(f)
+
+          assert set(manifest["variables"]) == expected
+
+          for name in sorted(expected):
+
+              path = directory / f"{name}.json"
+
+              with path.open() as f:
+                  data = json.load(f)
+
+              assert data["variable"] == name
+              assert data["date"] == manifest["date"]
+              assert data["shape"] == [256, 512]
+              assert len(data["lat"]) == 256
+              assert len(data["lon"]) == 512
+              assert len(data["anomaly"]) == 256
+
+              assert all(
+                  len(row) == 512
+                  for row in data["anomaly"]
+              )
+
+              valid = sum(
+                  value is not None
+                  for row in data["anomaly"]
+                  for value in row
+              )
+
+              assert valid > 0
+
+              print(
+                  f"{name:10s} | "
+                  f"{valid:>7,} valid cells | "
+                  f"{data['units']}"
+              )
+
+          print("-----------------------------")
+          print("SUCCESS: All 11 variables validated")
+          PY
+
+      - name: Upload test products
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-atmospheric-variables
+          path: data/latest/*.json
+          if-no-files-found: error
