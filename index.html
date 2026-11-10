@@ -69,7 +69,7 @@ h1 { font-size: clamp(30px, 4vw, 49px); font-weight: 650; letter-spacing: -1.5px
     background: radial-gradient(ellipse at 50% 46%, #244c70 0%, #102e4b 47%, #071b31 100%);
 }
 #globe { position: absolute; inset: 0; width: 100%; height: 100%; }
-/* Wind streaks are drawn above the map and below the viewer labels. */
+/* Static wind arrows overlay the globe without intercepting mouse gestures. */
 #wind-overlay {
     position: absolute;
     inset: 0;
@@ -275,7 +275,7 @@ footer a { color: var(--blue); text-decoration: none; }
 .method-links { display: flex; gap: 15px; flex-wrap: wrap; }
 .method-links a, .method-credit a { color: var(--blue); text-decoration: none; font-weight: 600; }
 .method-credit { font-size: 11px; line-height: 1.7; color: var(--muted); margin-top: 17px; }
-/* Optional animated wind-flow controls */
+/* Optional static wind-vector controls */
 .sidebar-section[hidden], .separator[hidden] { display: none !important; }
 .wind-check { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .wind-check input { accent-color: var(--blue); }
@@ -376,21 +376,23 @@ footer a { color: var(--blue); text-decoration: none; }
             </div>
             <hr class="separator" id="wind-separator" hidden>
             <div class="sidebar-section" id="wind-section" hidden>
-                <div class="section-title">Daily-mean wind flow</div>
+                <div class="section-title">Daily-mean wind vectors</div>
                 <label class="wind-check" for="wind-toggle">
                     <input id="wind-toggle" type="checkbox" checked>
-                    <span>Show animated wind</span>
+                    <span>Show wind arrows</span>
                 </label>
                 <label class="wind-range-label" for="wind-density">
-                    Particle density <span id="wind-density-value">900</span>
+                    Arrow density <span id="wind-density-value">300</span>
                 </label>
-                <input id="wind-density" type="range" min="300" max="2400" value="900" step="300">
-                <label class="wind-range-label" for="wind-speed">
-                    Animation speed <span id="wind-speed-value">1.0×</span>
+                <input id="wind-density" type="range" min="120" max="900" value="300" step="60"
+                       aria-label="Wind arrow density">
+                <label class="wind-range-label" for="wind-size">
+                    Arrow size <span id="wind-size-value">100%</span>
                 </label>
-                <input id="wind-speed" type="range" min="25" max="250" value="100" step="25">
+                <input id="wind-size" type="range" min="60" max="180" value="100" step="20"
+                       aria-label="Wind arrow size">
                 <p class="wind-caption" id="wind-status" aria-live="polite">Wind layer ready to load.</p>
-                <p class="wind-caption">Cyan: 850 hPa · Gold: 250 hPa. Moving streaks follow the daily-mean wind field, not observed parcel trajectories.</p>
+                <p class="wind-caption">Arrows show the direction of the original daily-mean wind. Arrow length is adjusted for legibility and does not represent wind speed.</p>
             </div>
             <hr class="separator">
             <div class="sidebar-section">
@@ -472,7 +474,7 @@ footer a { color: var(--blue); text-decoration: none; }
             <article class="method-card">
                 <h3>Latest common date &amp; wind display</h3>
                 <p>The monitor selects the <strong>most recent day for which all required FLX and PGB fields are available</strong>. All displayed anomalies therefore share one analysis date, shown above the globe. Products may lag the current day as NOAA updates its archive.</p>
-                <p>On wind-speed maps, optional particles follow the <strong>original daily-mean U and V wind fields</strong> at 850 or 250 hPa. The animation is illustrative: it does not depict time-varying winds or verified parcel trajectories.</p>
+                <p>On wind-speed maps, optional <strong>stationary arrows</strong> show the direction of the original daily-mean U and V wind fields at 850 or 250 hPa. Arrow size is a display setting, not a quantitative measure of wind speed. The background colors continue to represent wind-speed anomalies.</p>
             </article>
         </div>
         <p class="method-credit">Source acknowledgement: NOAA / NCEP / CPC CORe; EMC and PSL collaborating institutions. Scientific processing and web visualization: Global Atmospheric Monitor, an independent TRÓPICO initiative.</p>
@@ -618,6 +620,7 @@ const savedRanges = {};
 const container = $("globe");
 const windCanvas = $("wind-overlay");
 const windContext = windCanvas.getContext("2d", {alpha: true});
+let windLayerInitialized = false;
 const variableSelect = $("variable-select");
 const rangeInput = $("color-range");
 const status = $("status");
@@ -714,6 +717,8 @@ function resizeGlobe() {
         camera.position.setLength(distance);
     }
     controls.update();
+    // Wind arrows follow the geographic positions when the viewer resizes.
+    if (windLayerInitialized) drawWindArrows();
 }
 new ResizeObserver(resizeGlobe).observe(container);
 resizeGlobe();
@@ -927,38 +932,33 @@ function updateVariableInterface() {
 
 
 // ==========================================================
-// WIND FLOW: ORIGINAL DAILY-MEAN VECTORS, NOT ANOMALIES
-// High-contrast, camera-aware 2D streaks projected onto the 3D globe.
-// A dark outline and colored core remain visible over light/dark maps.
+// WIND ARROWS: ORIGINAL DAILY-MEAN VECTORS, NOT ANOMALIES
+// Static arrows are geographic markers that reproject when the
+// camera moves. Their size has no physical units; direction is
+// calculated from the original daily-mean U and V components.
 // ==========================================================
 
 const windSection = $("wind-section");
 const windSeparator = $("wind-separator");
 const windToggle = $("wind-toggle");
 const windDensity = $("wind-density");
-const windSpeed = $("wind-speed");
+const windSize = $("wind-size");
 const windStatus = $("wind-status");
 const windCache = {};
-const EARTH_RADIUS_M = 6371000;
 const RADIANS = Math.PI / 180;
 const DEGREES = 180 / Math.PI;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
-// Lower-level winds: cyan. Upper-level winds: soft gold.
-const WIND_STYLES = {
-    850: {
-        core: ["rgba(75,211,234,0.06)", "rgba(102,239,255,0.82)", "rgba(211,253,255,1)"],
-        border: "rgba(6,19,37,0.75)"
-    },
-    250: {
-        core: ["rgba(237,187,89,0.06)", "rgba(255,215,122,0.88)", "rgba(255,246,191,1)"],
-        border: "rgba(19,22,35,0.78)"
-    }
+// A pale outline protects contrast over dark anomalies; a dark
+// center remains legible on pale anomalies. No moving particles.
+const ARROW_STYLES = {
+    850: { ink: "rgba(7,55,72,0.97)", halo: "rgba(255,255,255,0.90)" },
+    250: { ink: "rgba(69,43,46,0.97)", halo: "rgba(255,255,255,0.90)" }
 };
 
 let windField = null;
-let windParticles = [];
+let windArrows = [];
 let windFetchSequence = 0;
-let windAnimationAccumulator = 0;
 
 function windLevelForVariable(variable) {
     if (variable === "wspd850") return 850;
@@ -966,8 +966,7 @@ function windLevelForVariable(variable) {
     return null;
 }
 
-// Geographic location to a point on the sphere. Uses the same
-// longitude registration as the anomaly texture and country borders.
+// Matches the longitude registration used by the anomaly texture.
 function windPoint(lon, lat) {
     const phi = (lon - CENTRAL_LONGITUDE) * RADIANS;
     const theta = lat * RADIANS;
@@ -979,29 +978,12 @@ function windPoint(lon, lat) {
     );
 }
 
-function clearWindGeometry() {
-    windParticles = [];
+function clearWindArrows() {
+    windArrows = [];
     windContext.clearRect(0, 0, container.clientWidth, container.clientHeight);
 }
 
-function spawnWindParticle() {
-    const limit = Math.sin(80 * RADIANS);
-    return {
-        lon: Math.random() * 360,
-        lat: Math.asin((2 * Math.random() - 1) * limit) * DEGREES,
-        age: Math.random() * 4,
-        lifespan: 5 + Math.random() * 7
-    };
-}
-
-function createWindParticles() {
-    clearWindGeometry();
-    if (!windField || !windToggle.checked) return;
-    const count = Number(windDensity.value);
-    windParticles = Array.from({length: count}, spawnWindParticle);
-}
-
-// Interpolate the original eastward/northward mean wind components.
+// Interpolate original eastward and northward daily-mean winds.
 function windAt(lon, lat) {
     if (!windField) return null;
     const lats = windField.lat;
@@ -1016,30 +998,54 @@ function windAt(lon, lat) {
     }
     const i1 = Math.min(Math.max(lo, 1), nlat - 1);
     const i0 = i1 - 1;
-    const fy = Math.max(0, Math.min(1, (lat - lats[i0]) / (lats[i1] - lats[i0])));
+    const fy = Math.max(0, Math.min(1,
+        (lat - lats[i0]) / (lats[i1] - lats[i0])));
     const step = 360 / nlon;
     const longitude = normalizeLongitude(lon);
     const j0 = Math.floor(longitude / step) % nlon;
     const j1 = (j0 + 1) % nlon;
     const fx = (longitude - j0 * step) / step;
+
     function blend(grid) {
         const a = grid[i0][j0], b = grid[i0][j1];
         const c = grid[i1][j0], d = grid[i1][j1];
         if (a === null || b === null || c === null || d === null) return null;
-        if (![a,b,c,d].every(Number.isFinite)) return null;
-        return (1-fy)*((1-fx)*a+fx*b)+fy*((1-fx)*c+fx*d);
+        if (![a, b, c, d].every(Number.isFinite)) return null;
+        return (1 - fy) * ((1 - fx) * a + fx * b)
+             + fy * ((1 - fx) * c + fx * d);
     }
     const u = blend(windField.u);
     const v = blend(windField.v);
     return u === null || v === null ? null : {u, v};
 }
 
-// Project a geographic location onto the canvas. The surface visibility
-// test prevents trails from appearing through the far side of the globe.
+// Uniform, reproducible sampling over the surface of the sphere.
+// The density slider specifies global sampling locations. Only
+// the visible hemisphere is drawn, so roughly half are visible.
+function rebuildWindArrows() {
+    clearWindArrows();
+    if (!windField || !windToggle.checked) return;
+
+    const count = Number(windDensity.value);
+    for (let i = 0; i < count; i++) {
+        const sinLat = 1 - 2 * (i + 0.5) / count;
+        const lat = Math.asin(sinLat) * DEGREES;
+        if (Math.abs(lat) > 83) continue;
+        const lon = normalizeLongitude(i * GOLDEN_ANGLE * DEGREES);
+        const wind = windAt(lon, lat);
+        if (!wind) continue;
+        const speed = Math.hypot(wind.u, wind.v);
+        if (speed < 0.7) continue; // Near-calm winds have no stable direction.
+        windArrows.push({lon, lat, east: wind.u / speed, north: wind.v / speed});
+    }
+    drawWindArrows();
+}
+
+// Project a point just above the globe. The near-side check keeps
+// arrows from appearing on the back hemisphere.
 function projectWindPoint(lon, lat) {
     const point = windPoint(lon, lat);
-    const centerToCamera = point.dot(camera.position);
-    if (centerToCamera < GLOBE_RADIUS * GLOBE_RADIUS + 0.05) return null;
+    if (point.dot(camera.position) <= GLOBE_RADIUS * GLOBE_RADIUS + 0.05) return null;
     point.project(camera);
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
     return {
@@ -1048,103 +1054,71 @@ function projectWindPoint(lon, lat) {
     };
 }
 
-function drawWindStreak(particle, level) {
-    const headWind = windAt(particle.lon, particle.lat);
-    if (!headWind) return;
-    const headSpeed = Math.hypot(headWind.u, headWind.v);
-    if (headSpeed < 1.0) return;
+// Draw the wind direction as a short shaft with an unfilled arrowhead.
+// The shaft is centered on each sample point; changing Arrow size
+// affects only its on-screen size, not the underlying daily wind.
+function drawArrow(x, y, dx, dy, length, style) {
+    const half = length * 0.5;
+    const x0 = x - dx * half, y0 = y - dy * half;
+    const x1 = x + dx * half, y1 = y + dy * half;
+    const head = Math.min(8.5, length * 0.36);
+    const wing = head * 0.48;
+    const backX = x1 - dx * head;
+    const backY = y1 - dy * head;
+    const px = -dy, py = dx;
 
-    const stepCount = 5;
-    const trailLength = Math.min(1100000, 200000 + 18000 * headSpeed);
-    const distancePerStep = trailLength / stepCount;
-    let lon = particle.lon;
-    let lat = particle.lat;
-    const points = [];
+    windContext.beginPath();
+    windContext.moveTo(x0, y0);
+    windContext.lineTo(x1, y1);
+    windContext.moveTo(backX + px * wing, backY + py * wing);
+    windContext.lineTo(x1, y1);
+    windContext.lineTo(backX - px * wing, backY - py * wing);
+    windContext.lineCap = "round";
+    windContext.lineJoin = "round";
 
-    for (let i = 0; i <= stepCount; i++) {
-        const projected = projectWindPoint(lon, lat);
-        if (!projected) break;
-        points.push(projected);
-        const wind = windAt(lon, lat);
-        if (!wind) break;
-        const speed = Math.hypot(wind.u, wind.v);
-        if (speed < 0.6) break;
-        const travelSeconds = distancePerStep / speed;
-        const cosLat = Math.max(0.16, Math.cos(lat * RADIANS));
-        lat = Math.max(-85, Math.min(85,
-            lat - wind.v * travelSeconds / EARTH_RADIUS_M * DEGREES));
-        lon = normalizeLongitude(lon - wind.u * travelSeconds /
-            (EARTH_RADIUS_M * cosLat) * DEGREES);
-    }
-
-    if (points.length < 2) return;
-    const head = points[0];
-    const tail = points[points.length - 1];
-    const ctx = windContext;
-    const palette = WIND_STYLES[level];
-
-    // Very short streaks are just a point; longer ones have a visible tail.
-    ctx.beginPath();
-    ctx.moveTo(tail.x, tail.y);
-    for (let i = points.length - 2; i >= 0; i--) {
-        ctx.lineTo(points[i].x, points[i].y);
-    }
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    // Dark outline: contrast on white, pale blue, and red anomalies.
-    ctx.globalAlpha = 0.85;
-    ctx.lineWidth = 3.6;
-    ctx.strokeStyle = palette.border;
-    ctx.stroke();
-
-    // Cyan/gold core with a bright head and a fading tail.
-    const gradient = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-    gradient.addColorStop(0, palette.core[0]);
-    gradient.addColorStop(0.55, palette.core[1]);
-    gradient.addColorStop(1, palette.core[2]);
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 1.75;
-    ctx.strokeStyle = gradient;
-    ctx.stroke();
-
-    // Small luminous head communicates the direction of flow.
-    ctx.beginPath();
-    ctx.arc(head.x, head.y, 1.55, 0, 2 * Math.PI);
-    ctx.fillStyle = palette.core[2];
-    ctx.fill();
+    windContext.strokeStyle = style.halo;
+    windContext.lineWidth = 4.1;
+    windContext.stroke();
+    windContext.strokeStyle = style.ink;
+    windContext.lineWidth = 1.9;
+    windContext.stroke();
 }
 
-function updateWindParticles(deltaSeconds) {
-    if (!windField || !windToggle.checked || windParticles.length === 0) return;
-    // 30 fps for wind on all screen sizes; globe rotation stays at native fps.
-    windAnimationAccumulator += Math.min(deltaSeconds, 0.1);
-    if (windAnimationAccumulator < 1 / 30) return;
-    const elapsed = Math.min(windAnimationAccumulator, 0.08);
-    windAnimationAccumulator = 0;
-    const speedFactor = Number(windSpeed.value) / 100;
-    const simulatedSeconds = elapsed * 14000 * speedFactor;
+function drawWindArrows() {
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    windContext.clearRect(0, 0, width, height);
     const level = windLevelForVariable(activeVariable);
-    if (!level) return;
-    windContext.clearRect(0, 0, container.clientWidth, container.clientHeight);
-    camera.updateMatrixWorld();
+    if (!windToggle.checked || !windField || !level || !windArrows.length) return;
 
-    for (let i = 0; i < windParticles.length; i++) {
-        let particle = windParticles[i];
-        let wind = windAt(particle.lon, particle.lat);
-        if (!wind || particle.age > particle.lifespan || Math.abs(particle.lat) > 81) {
-            particle = spawnWindParticle();
-            windParticles[i] = particle;
-            wind = windAt(particle.lon, particle.lat);
-        }
-        if (!wind) continue;
-        const cosLat = Math.max(0.16, Math.cos(particle.lat * RADIANS));
-        particle.lat = Math.max(-85, Math.min(85,
-            particle.lat + wind.v * simulatedSeconds / EARTH_RADIUS_M * DEGREES));
-        particle.lon = normalizeLongitude(particle.lon + wind.u * simulatedSeconds /
-            (EARTH_RADIUS_M * cosLat) * DEGREES);
-        particle.age += elapsed;
-        drawWindStreak(particle, level);
+    camera.updateMatrixWorld();
+    const sizeFactor = Number(windSize.value) / 100;
+    const style = ARROW_STYLES[level];
+
+    for (const arrow of windArrows) {
+        const center = projectWindPoint(arrow.lon, arrow.lat);
+        if (!center) continue;
+
+        // A short displacement following the meteorological east/north
+        // vector determines the projected screen-space arrow direction.
+        const delta = 0.8; // Angular direction probe, in degrees.
+        const probeLat = arrow.lat + arrow.north * delta;
+        const cosLat = Math.max(0.15, Math.cos(arrow.lat * RADIANS));
+        const probeLon = arrow.lon + arrow.east * delta / cosLat;
+        const tipProbe = projectWindPoint(probeLon, probeLat);
+        if (!tipProbe) continue;
+
+        const vx = tipProbe.x - center.x;
+        const vy = tipProbe.y - center.y;
+        const norm = Math.hypot(vx, vy);
+        if (norm < 0.05) continue;
+
+        const length = 22 * sizeFactor;
+        const dx = vx / norm, dy = vy / norm;
+        const margin = length * 0.5 + 4;
+        if (center.x < -margin || center.x > width + margin ||
+            center.y < -margin || center.y > height + margin) continue;
+        drawArrow(center.x, center.y, dx, dy, length, style);
     }
 }
 
@@ -1172,10 +1146,10 @@ async function synchronizeWindLayer() {
     windSection.hidden = level === null;
     windSeparator.hidden = level === null;
     windField = null;
-    clearWindGeometry();
+    clearWindArrows();
     if (level === null) return;
     if (!windToggle.checked) {
-        windStatus.textContent = "Wind animation paused.";
+        windStatus.textContent = "Wind arrows hidden.";
         return;
     }
     const name = `wind${level}`;
@@ -1196,7 +1170,7 @@ async function synchronizeWindLayer() {
         }
         if (request !== windFetchSequence || windLevelForVariable(activeVariable) !== level) return;
         windField = windCache[name];
-        createWindParticles();
+        rebuildWindArrows();
         windStatus.textContent = `${level}-hPa daily-mean vectors · ${manifest.date}`;
     } catch (error) {
         if (request !== windFetchSequence) return;
@@ -1208,10 +1182,16 @@ async function synchronizeWindLayer() {
 windToggle.addEventListener("change", synchronizeWindLayer);
 windDensity.addEventListener("input", () => {
     $("wind-density-value").textContent = windDensity.value;
-    if (windField) createWindParticles();
+    rebuildWindArrows();
 });
-windSpeed.addEventListener("input", () => {
-    $("wind-speed-value").textContent = (Number(windSpeed.value)/100).toFixed(2).replace(/\.?0+$/, "") + "×";
+windSize.addEventListener("input", () => {
+    $("wind-size-value").textContent = windSize.value + "%";
+    drawWindArrows();
+});
+windLayerInitialized = true;
+// Keep geographic arrows attached to the globe as the camera rotates or zooms.
+controls.addEventListener("change", () => {
+    if (windLayerInitialized) drawWindArrows();
 });
 
 // ==========================================================
@@ -1413,11 +1393,8 @@ authorDialog.addEventListener("click", event => {
 // 11. ANIMATE AND INITIALIZE
 // ==========================================================
 
-const animationClock = new THREE.Clock();
 function animate() {
     requestAnimationFrame(animate);
-    const delta = animationClock.getDelta();
-    updateWindParticles(delta);
     controls.update();
     renderer.render(scene, camera);
 }
