@@ -4,6 +4,9 @@ name: Update Global Atmospheric Monitor
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: "23 12 * * *"
+
 permissions:
   contents: read
 
