@@ -1,0 +1,93 @@
+
+name: Test Google Drive Access
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-drive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate with Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: tropico-atmospheric-monitor
+          workload_identity_provider: projects/490419539543/locations/global/workloadIdentityPools/gam-github-pool/providers/github-actions
+          service_account: gam-climatology-reader@tropico-atmospheric-monitor.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+          create_credentials_file: false
+
+      - name: Verify climatology folder access
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          python - <<'PY'
+          import os
+          import json
+          from urllib.request import Request, urlopen
+          from urllib.parse import urlencode
+
+          folder_id = "1iW30G3cAaIZceu2geZ0E9kg26Wlx3zE5"
+          token = os.environ["GOOGLE_ACCESS_TOKEN"]
+
+          headers = {
+              "Authorization": f"Bearer {token}"
+          }
+
+          params = {
+              "q": f"'{folder_id}' in parents and trashed = false",
+              "fields": "nextPageToken,files(id,name,mimeType)",
+              "pageSize": 1000,
+          }
+
+          url = (
+              "https://www.googleapis.com/drive/v3/files?"
+              + urlencode(params)
+          )
+
+          request = Request(url, headers=headers)
+
+          with urlopen(request, timeout=30) as response:
+              result = json.load(response)
+
+          names = {file["name"] for file in result.get("files", [])}
+
+          expected = {
+              "manifest.json",
+              "omega500",
+              "prate",
+              "pwat",
+              "t2m",
+              "u250",
+              "u850",
+              "v250",
+              "v850",
+              "wspd250",
+              "wspd850",
+              "z500",
+          }
+
+          missing = expected - names
+
+          print("Google Drive access test")
+          print("------------------------")
+          print(f"Items found: {len(names)}")
+          print(f"Expected items: {len(expected)}")
+
+          if missing:
+              raise SystemExit(
+                  f"Missing items: {', '.join(sorted(missing))}"
+              )
+
+          print("SUCCESS: All expected climatology items found.")
+          PY
