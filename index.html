@@ -69,6 +69,16 @@ h1 { font-size: clamp(30px, 4vw, 49px); font-weight: 650; letter-spacing: -1.5px
     background: radial-gradient(ellipse at 50% 46%, #244c70 0%, #102e4b 47%, #071b31 100%);
 }
 #globe { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Wind streaks are drawn above the map and below the viewer labels. */
+#wind-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+}
 #globe canvas { display: block; width: 100%; height: 100%; }
 .sidebar {
     position: absolute;
@@ -372,15 +382,15 @@ footer a { color: var(--blue); text-decoration: none; }
                     <span>Show animated wind</span>
                 </label>
                 <label class="wind-range-label" for="wind-density">
-                    Particle density <span id="wind-density-value">1500</span>
+                    Particle density <span id="wind-density-value">900</span>
                 </label>
-                <input id="wind-density" type="range" min="300" max="3000" value="1500" step="300">
+                <input id="wind-density" type="range" min="300" max="2400" value="900" step="300">
                 <label class="wind-range-label" for="wind-speed">
                     Animation speed <span id="wind-speed-value">1.0×</span>
                 </label>
                 <input id="wind-speed" type="range" min="25" max="250" value="100" step="25">
                 <p class="wind-caption" id="wind-status" aria-live="polite">Wind layer ready to load.</p>
-                <p class="wind-caption">Particle paths depict the daily-mean wind field, not observed parcel trajectories.</p>
+                <p class="wind-caption">Cyan: 850 hPa · Gold: 250 hPa. Moving streaks follow the daily-mean wind field, not observed parcel trajectories.</p>
             </div>
             <hr class="separator">
             <div class="sidebar-section">
@@ -392,6 +402,7 @@ footer a { color: var(--blue); text-decoration: none; }
 
         <section class="viewer" id="viewer" aria-label="Interactive 3D atmospheric globe">
             <div id="globe"></div>
+            <canvas id="wind-overlay" aria-hidden="true"></canvas>
             <div class="viewer-heading">
                 <h2 id="viewer-title">Global Temperature Anomalies</h2>
                 <p>NOAA CPC CORe · Daily analysis</p>
@@ -605,6 +616,8 @@ let canvasTexture = null;
 let loadSequence = 0;
 const savedRanges = {};
 const container = $("globe");
+const windCanvas = $("wind-overlay");
+const windContext = windCanvas.getContext("2d", {alpha: true});
 const variableSelect = $("variable-select");
 const rangeInput = $("color-range");
 const status = $("status");
@@ -689,6 +702,10 @@ function resizeGlobe() {
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     renderer.setSize(width, height, false);
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    windCanvas.width = Math.round(width * pixelRatio);
+    windCanvas.height = Math.round(height * pixelRatio);
+    windContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     controls.target.set(0, 0, 0);
     const distance = idealCameraDistance();
     controls.minDistance = Math.max(3.0, distance * 0.75);
@@ -911,6 +928,8 @@ function updateVariableInterface() {
 
 // ==========================================================
 // WIND FLOW: ORIGINAL DAILY-MEAN VECTORS, NOT ANOMALIES
+// High-contrast, camera-aware 2D streaks projected onto the 3D globe.
+// A dark outline and colored core remain visible over light/dark maps.
 // ==========================================================
 
 const windSection = $("wind-section");
@@ -923,10 +942,23 @@ const windCache = {};
 const EARTH_RADIUS_M = 6371000;
 const RADIANS = Math.PI / 180;
 const DEGREES = 180 / Math.PI;
+
+// Lower-level winds: cyan. Upper-level winds: soft gold.
+const WIND_STYLES = {
+    850: {
+        core: ["rgba(75,211,234,0.06)", "rgba(102,239,255,0.82)", "rgba(211,253,255,1)"],
+        border: "rgba(6,19,37,0.75)"
+    },
+    250: {
+        core: ["rgba(237,187,89,0.06)", "rgba(255,215,122,0.88)", "rgba(255,246,191,1)"],
+        border: "rgba(19,22,35,0.78)"
+    }
+};
+
 let windField = null;
-let windSegments = null;
 let windParticles = [];
 let windFetchSequence = 0;
+let windAnimationAccumulator = 0;
 
 function windLevelForVariable(variable) {
     if (variable === "wspd850") return 850;
@@ -934,31 +966,31 @@ function windLevelForVariable(variable) {
     return null;
 }
 
-function globeXYZ(lon, lat, radius = GLOBE_RADIUS * 1.013) {
+// Geographic location to a point on the sphere. Uses the same
+// longitude registration as the anomaly texture and country borders.
+function windPoint(lon, lat) {
     const phi = (lon - CENTRAL_LONGITUDE) * RADIANS;
     const theta = lat * RADIANS;
-    return [radius * Math.cos(theta) * Math.sin(phi),
-            radius * Math.sin(theta),
-            radius * Math.cos(theta) * Math.cos(phi)];
+    const radius = GLOBE_RADIUS * 1.016;
+    return new THREE.Vector3(
+        radius * Math.cos(theta) * Math.sin(phi),
+        radius * Math.sin(theta),
+        radius * Math.cos(theta) * Math.cos(phi)
+    );
 }
 
 function clearWindGeometry() {
-    if (windSegments) {
-        scene.remove(windSegments);
-        windSegments.geometry.dispose();
-        windSegments.material.dispose();
-        windSegments = null;
-    }
     windParticles = [];
+    windContext.clearRect(0, 0, container.clientWidth, container.clientHeight);
 }
 
 function spawnWindParticle() {
-    const s = Math.sin(82 * RADIANS);
+    const limit = Math.sin(80 * RADIANS);
     return {
         lon: Math.random() * 360,
-        lat: Math.asin((2 * Math.random() - 1) * s) * DEGREES,
-        age: Math.random() * 10,
-        lifespan: 9 + Math.random() * 11
+        lat: Math.asin((2 * Math.random() - 1) * limit) * DEGREES,
+        age: Math.random() * 4,
+        lifespan: 5 + Math.random() * 7
     };
 }
 
@@ -967,20 +999,9 @@ function createWindParticles() {
     if (!windField || !windToggle.checked) return;
     const count = Number(windDensity.value);
     windParticles = Array.from({length: count}, spawnWindParticle);
-    const positions = new Float32Array(count * 6);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3)
-        .setUsage(THREE.DynamicDrawUsage));
-    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), GLOBE_RADIUS * 1.1);
-    const material = new THREE.LineBasicMaterial({
-        color: 0xf1fbff, transparent: true, opacity: 0.77,
-        depthTest: true, depthWrite: false
-    });
-    windSegments = new THREE.LineSegments(geometry, material);
-    windSegments.renderOrder = 2;
-    scene.add(windSegments);
 }
 
+// Interpolate the original eastward/northward mean wind components.
 function windAt(lon, lat) {
     if (!windField) return null;
     const lats = windField.lat;
@@ -997,14 +1018,15 @@ function windAt(lon, lat) {
     const i0 = i1 - 1;
     const fy = Math.max(0, Math.min(1, (lat - lats[i0]) / (lats[i1] - lats[i0])));
     const step = 360 / nlon;
-    const lon360 = normalizeLongitude(lon);
-    const j0 = Math.floor(lon360 / step) % nlon;
+    const longitude = normalizeLongitude(lon);
+    const j0 = Math.floor(longitude / step) % nlon;
     const j1 = (j0 + 1) % nlon;
-    const fx = (lon360 - j0 * step) / step;
+    const fx = (longitude - j0 * step) / step;
     function blend(grid) {
         const a = grid[i0][j0], b = grid[i0][j1];
         const c = grid[i1][j0], d = grid[i1][j1];
-        if ([a,b,c,d].some(v => v === null || !Number.isFinite(v))) return null;
+        if (a === null || b === null || c === null || d === null) return null;
+        if (![a,b,c,d].every(Number.isFinite)) return null;
         return (1-fy)*((1-fx)*a+fx*b)+fy*((1-fx)*c+fx*d);
     }
     const u = blend(windField.u);
@@ -1012,35 +1034,118 @@ function windAt(lon, lat) {
     return u === null || v === null ? null : {u, v};
 }
 
-function updateWindParticles(deltaSeconds) {
-    if (!windSegments || !windField || !windToggle.checked) return;
-    const positions = windSegments.geometry.attributes.position.array;
-    const speedFactor = Number(windSpeed.value) / 100;
-    const simulatedSeconds = Math.min(deltaSeconds, 0.05) * 10000 * speedFactor;
-    for (let k = 0; k < windParticles.length; k++) {
-        let p = windParticles[k];
-        let uv = windAt(p.lon, p.lat);
-        if (!uv || p.age > p.lifespan || Math.abs(p.lat) > 82) {
-            p = spawnWindParticle();
-            windParticles[k] = p;
-            uv = windAt(p.lon, p.lat);
-        }
-        if (!uv) continue;
-        const cosLat = Math.max(0.12, Math.cos(p.lat * RADIANS));
-        // Short upstream streak, longer where the wind is stronger.
-        const streakSeconds = 12500;
-        const tailLon = p.lon - uv.u * streakSeconds / (EARTH_RADIUS_M * cosLat) * DEGREES;
-        const tailLat = p.lat - uv.v * streakSeconds / EARTH_RADIUS_M * DEGREES;
-        const tail = globeXYZ(tailLon, Math.max(-85, Math.min(85, tailLat)));
-        const head = globeXYZ(p.lon, p.lat);
-        const n = k * 6;
-        positions[n] = tail[0]; positions[n + 1] = tail[1]; positions[n + 2] = tail[2];
-        positions[n + 3] = head[0]; positions[n + 4] = head[1]; positions[n + 5] = head[2];
-        p.lat += uv.v * simulatedSeconds / EARTH_RADIUS_M * DEGREES;
-        p.lon = normalizeLongitude(p.lon + uv.u * simulatedSeconds / (EARTH_RADIUS_M * cosLat) * DEGREES);
-        p.age += deltaSeconds;
+// Project a geographic location onto the canvas. The surface visibility
+// test prevents trails from appearing through the far side of the globe.
+function projectWindPoint(lon, lat) {
+    const point = windPoint(lon, lat);
+    const centerToCamera = point.dot(camera.position);
+    if (centerToCamera < GLOBE_RADIUS * GLOBE_RADIUS + 0.05) return null;
+    point.project(camera);
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    return {
+        x: (point.x * 0.5 + 0.5) * container.clientWidth,
+        y: (-point.y * 0.5 + 0.5) * container.clientHeight
+    };
+}
+
+function drawWindStreak(particle, level) {
+    const headWind = windAt(particle.lon, particle.lat);
+    if (!headWind) return;
+    const headSpeed = Math.hypot(headWind.u, headWind.v);
+    if (headSpeed < 1.0) return;
+
+    const stepCount = 5;
+    const trailLength = Math.min(1100000, 200000 + 18000 * headSpeed);
+    const distancePerStep = trailLength / stepCount;
+    let lon = particle.lon;
+    let lat = particle.lat;
+    const points = [];
+
+    for (let i = 0; i <= stepCount; i++) {
+        const projected = projectWindPoint(lon, lat);
+        if (!projected) break;
+        points.push(projected);
+        const wind = windAt(lon, lat);
+        if (!wind) break;
+        const speed = Math.hypot(wind.u, wind.v);
+        if (speed < 0.6) break;
+        const travelSeconds = distancePerStep / speed;
+        const cosLat = Math.max(0.16, Math.cos(lat * RADIANS));
+        lat = Math.max(-85, Math.min(85,
+            lat - wind.v * travelSeconds / EARTH_RADIUS_M * DEGREES));
+        lon = normalizeLongitude(lon - wind.u * travelSeconds /
+            (EARTH_RADIUS_M * cosLat) * DEGREES);
     }
-    windSegments.geometry.attributes.position.needsUpdate = true;
+
+    if (points.length < 2) return;
+    const head = points[0];
+    const tail = points[points.length - 1];
+    const ctx = windContext;
+    const palette = WIND_STYLES[level];
+
+    // Very short streaks are just a point; longer ones have a visible tail.
+    ctx.beginPath();
+    ctx.moveTo(tail.x, tail.y);
+    for (let i = points.length - 2; i >= 0; i--) {
+        ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // Dark outline: contrast on white, pale blue, and red anomalies.
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 3.6;
+    ctx.strokeStyle = palette.border;
+    ctx.stroke();
+
+    // Cyan/gold core with a bright head and a fading tail.
+    const gradient = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+    gradient.addColorStop(0, palette.core[0]);
+    gradient.addColorStop(0.55, palette.core[1]);
+    gradient.addColorStop(1, palette.core[2]);
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.75;
+    ctx.strokeStyle = gradient;
+    ctx.stroke();
+
+    // Small luminous head communicates the direction of flow.
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, 1.55, 0, 2 * Math.PI);
+    ctx.fillStyle = palette.core[2];
+    ctx.fill();
+}
+
+function updateWindParticles(deltaSeconds) {
+    if (!windField || !windToggle.checked || windParticles.length === 0) return;
+    // 30 fps for wind on all screen sizes; globe rotation stays at native fps.
+    windAnimationAccumulator += Math.min(deltaSeconds, 0.1);
+    if (windAnimationAccumulator < 1 / 30) return;
+    const elapsed = Math.min(windAnimationAccumulator, 0.08);
+    windAnimationAccumulator = 0;
+    const speedFactor = Number(windSpeed.value) / 100;
+    const simulatedSeconds = elapsed * 14000 * speedFactor;
+    const level = windLevelForVariable(activeVariable);
+    if (!level) return;
+    windContext.clearRect(0, 0, container.clientWidth, container.clientHeight);
+    camera.updateMatrixWorld();
+
+    for (let i = 0; i < windParticles.length; i++) {
+        let particle = windParticles[i];
+        let wind = windAt(particle.lon, particle.lat);
+        if (!wind || particle.age > particle.lifespan || Math.abs(particle.lat) > 81) {
+            particle = spawnWindParticle();
+            windParticles[i] = particle;
+            wind = windAt(particle.lon, particle.lat);
+        }
+        if (!wind) continue;
+        const cosLat = Math.max(0.16, Math.cos(particle.lat * RADIANS));
+        particle.lat = Math.max(-85, Math.min(85,
+            particle.lat + wind.v * simulatedSeconds / EARTH_RADIUS_M * DEGREES));
+        particle.lon = normalizeLongitude(particle.lon + wind.u * simulatedSeconds /
+            (EARTH_RADIUS_M * cosLat) * DEGREES);
+        particle.age += elapsed;
+        drawWindStreak(particle, level);
+    }
 }
 
 function validateWindProduct(wind, name) {

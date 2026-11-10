@@ -48,7 +48,7 @@ jobs:
             requests
 
       # ----------------------------------------------------
-      # Authenticate using Workload Identity Federation
+      # Authenticate with Google Cloud
       # ----------------------------------------------------
 
       - name: Authenticate with Google Cloud
@@ -63,51 +63,156 @@ jobs:
           create_credentials_file: false
 
       # ----------------------------------------------------
-      # Calculate daily T2M anomalies
+      # Process daily NOAA CPC CORe products
       # ----------------------------------------------------
 
-      - name: Process daily CORe temperature
+      - name: Process daily atmospheric data
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
           python scripts/update_daily_core.py
 
       # ----------------------------------------------------
-      # Validate output
+      # Validate all atmospheric products
       # ----------------------------------------------------
 
-      - name: Validate visualization data
+      - name: Validate atmospheric data
         run: |
           python - <<'PY'
           import json
+          import math
           from pathlib import Path
 
-          path = Path("data/latest/t2m.json")
+          folder = Path("data/latest")
 
-          if not path.is_file():
-              raise FileNotFoundError(path)
+          variables = [
+              "t2m",
+              "prate",
+              "pwat",
+              "u850",
+              "v850",
+              "u250",
+              "v250",
+              "wspd850",
+              "wspd250",
+              "z500",
+              "omega500",
+          ]
 
-          with path.open(encoding="utf-8") as f:
-              data = json.load(f)
+          wind_layers = ["wind850", "wind250"]
 
-          assert data["variable"] == "t2m"
-          assert data["units"] == "degC"
-          assert data["shape"] == [256, 512]
-          assert len(data["lat"]) == 256
-          assert len(data["lon"]) == 512
-          assert len(data["anomaly"]) == 256
-          assert all(
-              len(row) == 512
-              for row in data["anomaly"]
-          )
+          with (folder / "manifest.json").open(
+              encoding="utf-8"
+          ) as f:
+              manifest = json.load(f)
 
-          print("Global Atmospheric Monitor")
-          print("--------------------------")
-          print(f"Variable: {data['variable']}")
-          print(f"Date: {data['date']}")
-          print(f"Grid: {data['shape']}")
-          print(f"Size: {path.stat().st_size:,} bytes")
-          print("SUCCESS: Visualization data validated")
+          assert set(manifest["variables"]) == set(variables)
+          assert set(manifest["wind_layers"]) == set(wind_layers)
+
+          date = manifest["date"]
+          shape = [256, 512]
+
+          print("=" * 60)
+          print("GLOBAL ATMOSPHERIC MONITOR")
+          print(f"Analysis date: {date}")
+          print("=" * 60)
+
+          # Validate all 11 anomaly products.
+
+          for name in variables:
+
+              path = folder / f"{name}.json"
+
+              with path.open(encoding="utf-8") as f:
+                  data = json.load(f)
+
+              assert data["variable"] == name
+              assert data["date"] == date
+              assert data["shape"] == shape
+              assert len(data["lat"]) == 256
+              assert len(data["lon"]) == 512
+
+              values = data["anomaly"]
+
+              assert len(values) == 256
+
+              valid = 0
+
+              for row in values:
+                  assert len(row) == 512
+
+                  for value in row:
+                      if value is not None:
+                          assert isinstance(value, (int, float))
+                          assert math.isfinite(value)
+                          valid += 1
+
+              assert valid > 0
+
+              print(
+                  f"SUCCESS {name:10s}: "
+                  f"{valid:,} valid anomaly cells"
+              )
+
+          # Validate original wind vector products.
+
+          for name in wind_layers:
+
+              path = folder / f"{name}.json"
+
+              with path.open(encoding="utf-8") as f:
+                  data = json.load(f)
+
+              assert data["variable"] == name
+              assert data["date"] == date
+              assert data["shape"] == shape
+              assert data["units"] == "m/s"
+              assert (
+                  data["field_type"]
+                  == "original_daily_mean_wind"
+              )
+
+              assert len(data["lat"]) == 256
+              assert len(data["lon"]) == 512
+
+              expected_level = int(name.replace("wind", ""))
+
+              assert data["level_hpa"] == expected_level
+
+              u = data["u"]
+              v = data["v"]
+
+              assert len(u) == 256
+              assert len(v) == 256
+
+              valid = 0
+
+              for urow, vrow in zip(u, v):
+
+                  assert len(urow) == 512
+                  assert len(vrow) == 512
+
+                  for uu, vv in zip(urow, vrow):
+
+                      assert (uu is None) == (vv is None)
+
+                      if uu is not None:
+                          assert math.isfinite(uu)
+                          assert math.isfinite(vv)
+                          valid += 1
+
+              assert valid > 0
+
+              print(
+                  f"SUCCESS {name:10s}: "
+                  f"{valid:,} valid wind vectors"
+              )
+
+          print("=" * 60)
+          print("SUCCESS: All 11 anomaly products validated")
+          print("SUCCESS: Both wind layers validated")
+          print("SUCCESS: All products use the same date")
+          print("SUCCESS: manifest.json validated")
           PY
 
       # ----------------------------------------------------
@@ -118,40 +223,39 @@ jobs:
         run: |
           mkdir -p _site/data/latest
 
+          # Complete HTML: CSS and JavaScript are embedded.
           cp index.html _site/
-          cp privacy.html _site/
 
-          if [ -d css ]; then
-            cp -R css _site/
-          fi
+          # Images, logos and author portrait.
+          cp -R assets _site/
 
-          if [ -d js ]; then
-            cp -R js _site/
-          fi
-
-          if [ -d assets ]; then
-            cp -R assets _site/
-          fi
-
+          # Atmospheric data products.
           cp data/latest/*.json _site/data/latest/
 
+          # Disable Jekyll processing.
           touch _site/.nojekyll
 
-          echo "Checking public atmospheric products:"
+          echo "Checking published files:"
+          ls -lh _site/
           ls -lh _site/data/latest/
 
+          test -f _site/index.html
           test -f _site/data/latest/manifest.json
 
           for variable in \
             t2m prate pwat \
             u850 v850 u250 v250 \
-            wspd850 wspd250 z500 omega500
+            wspd850 wspd250 \
+            z500 omega500 \
+            wind850 wind250
           do
             test -f "_site/data/latest/${variable}.json"
           done
 
-          echo "SUCCESS: All 12 JSON products ready"
-
+          echo "SUCCESS: 11 anomaly products ready"
+          echo "SUCCESS: 2 wind vector products ready"
+          echo "SUCCESS: 1 manifest ready"
+          echo "SUCCESS: Website ready for deployment"
 
       # ----------------------------------------------------
       # Upload GitHub Pages artifact
@@ -164,7 +268,6 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: _site
-
 
   # ========================================================
   # 2. DEPLOY PUBLIC WEBSITE
