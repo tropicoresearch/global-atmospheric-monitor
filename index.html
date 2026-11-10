@@ -1,121 +1,1788 @@
+
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>Global Atmospheric Monitor | TRÓPICO</title>
+<title>Global Atmospheric Monitor | TRÓPICO</title>
 
-    <meta name="description"
-          content="Interactive global atmospheric monitoring and daily anomalies using NOAA CPC CORe data.">
+<meta name="description"
+      content="Interactive visualization of daily global atmospheric conditions and anomalies using NOAA CPC CORe data.">
 
-    <link rel="stylesheet" href="css/style.css">
+<style>
+:root {
+    --navy: #092747;
+    --blue: #17659c;
+    --muted: #697b8d;
+    --border: #dfe6ef;
+    --background: #f5f7fb;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Arial, sans-serif;
+    color: var(--navy);
+    background: var(--background);
+}
+
+header {
+    height: 78px;
+    padding: 0 5%;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 25px;
+    border-bottom: 1px solid var(--border);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.brand img {
+    width: 145px;
+    height: 54px;
+    object-fit: contain;
+}
+
+.brand-name {
+    border-left: 1px solid var(--border);
+    padding-left: 20px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+}
+
+nav {
+    display: flex;
+    gap: 25px;
+}
+
+nav a {
+    color: var(--navy);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+nav a:hover {
+    color: var(--blue);
+}
+
+main {
+    max-width: 1560px;
+    padding: 36px 4%;
+    margin: auto;
+}
+
+.introduction {
+    margin-bottom: 26px;
+}
+
+.eyebrow {
+    color: var(--blue);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+h1 {
+    font-size: clamp(30px, 4vw, 49px);
+    font-weight: 650;
+    letter-spacing: -1.6px;
+    line-height: 1.15;
+    margin: 12px 0;
+}
+
+.description {
+    max-width: 780px;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--muted);
+}
+
+.monitor {
+    display: grid;
+    grid-template-columns: 285px minmax(0, 1fr);
+    gap: 18px;
+    align-items: stretch;
+}
+
+.sidebar {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px;
+}
+
+.section-title {
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--muted);
+    margin: 0 0 18px;
+}
+
+.variable-name {
+    font-size: 21px;
+    font-weight: 650;
+    line-height: 1.25;
+}
+
+.variable-description {
+    margin-top: 7px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+}
+
+.separator {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 25px 0;
+}
+
+.data-label {
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 7px;
+}
+
+.data-value {
+    font-size: 17px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.reference {
+    font-size: 13px;
+    font-weight: 550;
+}
+
+.range-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.range-row strong {
+    font-size: 13px;
+}
+
+input[type="range"] {
+    width: 100%;
+    margin: 14px 0 5px;
+    accent-color: #24689e;
+    cursor: pointer;
+}
+
+.range-limits {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.actions {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+button {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: #f9fbfd;
+    color: var(--navy);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #eaf2f8;
+}
+
+button:focus-visible,
+input:focus-visible {
+    outline: 3px solid #8db8e8;
+    outline-offset: 2px;
+}
+
+.viewer {
+    min-height: 660px;
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    border-radius: 14px;
+    background:
+        radial-gradient(ellipse at 50% 46%,
+            #244c70 0%,
+            #102e4b 47%,
+            #071b31 100%);
+}
+
+#globe {
+    position: absolute;
+    inset: 0;
+}
+
+.viewer-heading {
+    position: absolute;
+    top: 27px;
+    left: 30px;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.viewer-heading h2 {
+    color: white;
+    margin: 0 0 8px;
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.viewer-heading p {
+    color: #c6d8e8;
+    margin: 0;
+    font-size: 12px;
+}
+
+.status {
+    position: absolute;
+    top: 30px;
+    right: 28px;
+    z-index: 2;
+    color: #d8ecf7;
+    font-size: 11px;
+    background: rgba(255,255,255,0.09);
+    padding: 9px 13px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 20px;
+    pointer-events: none;
+}
+
+.legend {
+    position: absolute;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(410px, 75%);
+    z-index: 2;
+    color: white;
+    pointer-events: none;
+}
+
+.legend-title {
+    text-align: center;
+    font-size: 12px;
+    margin-bottom: 11px;
+}
+
+.colorbar {
+    height: 15px;
+    width: 100%;
+    border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 3px;
+    background: linear-gradient(
+        to right,
+        #20488c 0%,
+        #3976c0 20%,
+        #add7e5 40%,
+        #f0f0ee 50%,
+        #f5b58b 65%,
+        #d95047 83%,
+        #812532 100%
+    );
+}
+
+.legend-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    margin-top: 9px;
+    color: #d9e5ef;
+}
+
+.coordinate {
+    position: absolute;
+    right: 25px;
+    bottom: 105px;
+    z-index: 2;
+    background: rgba(7, 24, 44, 0.75);
+    border: 1px solid rgba(255,255,255,0.13);
+    border-radius: 9px;
+    padding: 13px 16px;
+    min-width: 180px;
+    color: white;
+    pointer-events: none;
+}
+
+.coordinate-label {
+    font-size: 10px;
+    color: #b7cadc;
+}
+
+.coordinate-value {
+    font-weight: 650;
+    font-size: 20px;
+    margin-top: 4px;
+}
+
+.coordinate-location {
+    font-size: 11px;
+    margin-top: 6px;
+    color: #c1d5e5;
+}
+
+.loading {
+    position: absolute;
+    left: 50%;
+    top: 52%;
+    transform: translate(-50%, -50%);
+    color: #e0eaf4;
+    font-size: 13px;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.error {
+    display: none;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(420px, 85%);
+    transform: translate(-50%, -50%);
+    padding: 22px;
+    border-radius: 10px;
+    background: rgba(50, 20, 30, 0.95);
+    color: white;
+    font-size: 13px;
+    line-height: 1.7;
+    z-index: 4;
+    overflow-wrap: anywhere;
+}
+
+.notes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.note {
+    padding: 24px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+}
+
+.note h3 {
+    font-size: 14px;
+    margin: 0 0 10px;
+}
+
+.note p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.8;
+}
+
+footer {
+    text-align: center;
+    margin-top: 38px;
+    padding: 28px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.9;
+}
+
+footer a {
+    color: var(--blue);
+    text-decoration: none;
+}
+
+@media(max-width: 900px) {
+    .monitor {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px 24px;
+    }
+
+    .sidebar .separator {
+        display: none;
+    }
+
+    .viewer {
+        min-height: 580px;
+    }
+}
+
+@media(max-width: 600px) {
+    header {
+        padding: 10px 5%;
+        height: auto;
+        flex-wrap: wrap;
+    }
+
+    .brand-name {
+        display: none;
+    }
+
+    .brand img {
+        width: 125px;
+    }
+
+    nav {
+        gap: 14px;
+    }
+
+    main {
+        padding: 24px 4%;
+    }
+
+    .sidebar {
+        display: block;
+    }
+
+    .sidebar .separator {
+        display: block;
+    }
+
+    .viewer {
+        min-height: 510px;
+    }
+
+    .viewer-heading {
+        top: 18px;
+        left: 18px;
+    }
+
+    .viewer-heading h2 {
+        font-size: 15px;
+    }
+
+    .status {
+        top: 65px;
+        right: 15px;
+    }
+
+    .coordinate {
+        right: 12px;
+        bottom: 95px;
+        min-width: 130px;
+    }
+
+    .coordinate-value {
+        font-size: 15px;
+    }
+
+    .notes {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+    }
+}
+</script>
+
 </head>
 
 <body>
 
 <header>
-    <div class="brand">TRÓPICO</div>
+
+    <div class="brand">
+
+        <a href="./" aria-label="Global Atmospheric Monitor">
+            <img src="assets/tropico_logo.png" alt="TRÓPICO">
+        </a>
+
+        <div class="brand-name">
+            Research Group on Tropical Climatology,<br>
+            Hydrology, and Meteorology
+        </div>
+
+    </div>
 
     <nav>
-        <a href="./">Home</a>
+        <a href="./">Monitor</a>
         <a href="privacy.html">Privacy</a>
-        <a href="https://tropicoresearch.github.io/">Research Group</a>
+        <a href="https://tropicoresearch.github.io/"
+           target="_blank" rel="noopener">TRÓPICO</a>
     </nav>
+
 </header>
 
 <main>
 
-    <div class="hero">
-        <span class="status">Under Development</span>
+    <div class="introduction">
 
-        <h1>Global Atmospheric Monitor</h1>
+        <div class="eyebrow">
+            Global Atmospheric Monitoring
+        </div>
 
-        <p class="subtitle">
-            Daily Global Atmospheric Conditions and Anomalies
+        <h1>Explore the Atmosphere</h1>
+
+        <p class="description">
+            An interactive view of daily atmospheric conditions
+            and anomalies across the globe, based on NOAA CPC CORe
+            analyses and a 1991–2020 reference climatology.
         </p>
 
-        <p>
-            An interactive scientific visualization initiative
-            developed by TRÓPICO.
-        </p>
     </div>
 
-    <section>
-        <h2>About the Project</h2>
+    <div class="monitor">
 
-        <p>
-            Global Atmospheric Monitor aims to provide an
-            interactive visualization of recent atmospheric
-            conditions and anomalies across the globe.
-        </p>
+        <aside class="sidebar">
 
-        <p>
-            The project uses NOAA Climate Prediction Center
-            CORe daily atmospheric analyses and reference
-            climatologies calculated for 1991–2020.
-        </p>
-    </section>
+            <div>
+                <div class="section-title">
+                    Atmospheric variable
+                </div>
 
-    <section>
-        <h2>Scientific Data</h2>
+                <div class="variable-name">
+                    2-m Air Temperature
+                </div>
 
-        <p>
-            The monitoring system is being developed to display
-            atmospheric temperature, precipitation, moisture,
-            horizontal winds, geopotential height, and
-            vertical motion.
-        </p>
+                <div class="variable-description">
+                    Daily temperature anomaly relative to
+                    the 1991–2020 climatological annual cycle.
+                </div>
+            </div>
 
-        <p>
-            The daily reference climatologies are calculated
-            using the original NOAA CPC CORe spatial grid.
-        </p>
-    </section>
+            <hr class="separator">
 
-    <section>
-        <h2>Google Drive Integration</h2>
+            <div>
+                <div class="section-title">Analysis date</div>
+                <div class="data-value" id="analysis-date">
+                    Loading...
+                </div>
+            </div>
 
-        <p>
-            Google Drive is used by the project's authorized
-            scientific processing tools to retrieve reference
-            climatology files.
-        </p>
+            <hr class="separator">
 
-        <p>
-            The Google Drive connection uses read-only
-            authorization. Website visitors do not need
-            a Google account or access to Google Drive.
-        </p>
+            <div>
+                <div class="section-title">
+                    Reference climatology
+                </div>
 
-        <p>
-            <a href="privacy.html">Read our Privacy Policy</a>
-        </p>
-    </section>
+                <div class="reference">
+                    1991–2020
+                </div>
 
-    <section>
-        <h2>Interactive Globe</h2>
+                <p class="variable-description">
+                    Daily climatology with a centered
+                    31-day smoothing window.
+                </p>
+            </div>
 
-        <p>
-            The interactive three-dimensional atmospheric
-            visualization is currently under development.
-        </p>
-    </section>
+            <hr class="separator">
+
+            <div>
+                <div class="section-title">Color scale</div>
+
+                <div class="range-row">
+                    <span class="data-label">
+                        Symmetric range
+                    </span>
+                    <strong id="range-label">±15 °C</strong>
+                </div>
+
+                <input
+                    type="range"
+                    id="color-range"
+                    min="5"
+                    max="25"
+                    value="15"
+                    step="1"
+                    aria-label="Temperature anomaly color range"
+                >
+
+                <div class="range-limits">
+                    <span>±5 °C</span>
+                    <span>±25 °C</span>
+                </div>
+            </div>
+
+            <hr class="separator">
+
+            <div>
+                <div class="section-title">Globe controls</div>
+
+                <div class="actions">
+                    <button id="rotation-button">
+                        Pause rotation
+                    </button>
+
+                    <button id="borders-button">
+                        Hide borders
+                    </button>
+
+                    <button id="reset-button">
+                        Reset view
+                    </button>
+                </div>
+            </div>
+
+            <hr class="separator">
+
+            <div>
+                <div class="section-title">Data coverage</div>
+
+                <div class="data-value" id="grid-points">
+                    —
+                </div>
+
+                <div class="variable-description">
+                    Valid grid cells
+                </div>
+            </div>
+
+        </aside>
+
+        <section class="viewer" id="viewer">
+
+            <div id="globe"></div>
+
+            <div class="viewer-heading">
+                <h2>Global Temperature Anomalies</h2>
+                <p>NOAA CPC CORe · Daily analysis</p>
+            </div>
+
+            <div class="status" id="status">
+                Loading atmospheric data
+            </div>
+
+            <div class="loading" id="loading">
+                Loading daily atmospheric anomalies...
+            </div>
+
+            <div class="error" id="error"></div>
+
+            <div class="coordinate">
+
+                <div class="coordinate-label">
+                    Temperature anomaly
+                </div>
+
+                <div class="coordinate-value" id="hover-value">
+                    Move over globe
+                </div>
+
+                <div class="coordinate-location" id="hover-location">
+                    Latitude · Longitude
+                </div>
+
+            </div>
+
+            <div class="legend">
+
+                <div class="legend-title">
+                    2-m Temperature Anomaly (°C)
+                </div>
+
+                <div class="colorbar"></div>
+
+                <div class="legend-ticks">
+                    <span id="tick-left">−15</span>
+                    <span id="tick-midleft">−7.5</span>
+                    <span>0</span>
+                    <span id="tick-midright">+7.5</span>
+                    <span id="tick-right">+15</span>
+                </div>
+
+            </div>
+
+        </section>
+
+    </div>
+
+    <div class="notes">
+
+        <div class="note">
+            <h3>About the Dataset</h3>
+            <p>
+                NOAA CPC CORe provides global atmospheric analyses
+                on a Gaussian grid. Daily anomalies are calculated
+                against a fixed 1991–2020 reference climatology.
+                The original grid is preserved for scientific
+                calculations. The globe uses a visualization
+                texture derived from these values.
+            </p>
+        </div>
+
+        <div class="note">
+            <h3>Scientific Interpretation</h3>
+            <p>
+                Positive temperature anomalies indicate warmer
+                conditions than the climatological reference,
+                while negative anomalies indicate cooler conditions.
+                These atmospheric anomalies do not establish
+                attribution to ENSO or another climate phenomenon.
+            </p>
+        </div>
+
+    </div>
 
 </main>
 
 <footer>
-    <p>
-        TRÓPICO — Research Group on Tropical Climatology,
-        Hydrology, and Meteorology
-    </p>
+
+    <strong>Global Atmospheric Monitor</strong><br>
+
+    TRÓPICO — Research Group on Tropical Climatology,
+    Hydrology, and Meteorology
 
     <p>
-        Independent scientific initiative ·
-        <a href="privacy.html">Privacy Policy</a>
+        Independent scientific visualization initiative.
+        Not an official NOAA operational product.
     </p>
+
+    <a href="privacy.html">Privacy Policy</a>
+
 </footer>
+
+<script type="module">
+
+import * as THREE from "three";
+
+import {
+    OrbitControls
+} from "three/addons/controls/OrbitControls.js";
+
+import {
+    mesh as topoMesh
+} from "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm";
+
+
+// ==========================================================
+// 1. CONFIGURATION
+// ==========================================================
+
+const DATA_URL = "./data/latest/t2m.json";
+
+const WORLD_URL =
+    "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json";
+
+const TEXTURE_WIDTH = 2048;
+const TEXTURE_HEIGHT = 1024;
+
+const GLOBE_RADIUS = 2.0;
+
+// Longitude visible at the front of the initial globe.
+const CENTRAL_LONGITUDE = -40;
+
+let data = null;
+let worldTopology = null;
+
+let colorRange = 15;
+let showBorders = true;
+let autoRotate = true;
+
+let canvasTexture = null;
+
+
+// ==========================================================
+// 2. ELEMENTS
+// ==========================================================
+
+const container = document.getElementById("globe");
+
+const status = document.getElementById("status");
+const loading = document.getElementById("loading");
+const errorBox = document.getElementById("error");
+
+const analysisDate = document.getElementById("analysis-date");
+const gridPoints = document.getElementById("grid-points");
+
+const rangeInput = document.getElementById("color-range");
+const rangeLabel = document.getElementById("range-label");
+
+const hoverValue = document.getElementById("hover-value");
+const hoverLocation = document.getElementById("hover-location");
+
+const rotationButton = document.getElementById("rotation-button");
+const bordersButton = document.getElementById("borders-button");
+const resetButton = document.getElementById("reset-button");
+
+
+// ==========================================================
+// 3. THREE.JS SCENE
+// ==========================================================
+
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(
+    45,
+    1,
+    0.1,
+    100
+);
+
+camera.position.set(0, 0, 6.5);
+
+const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true,
+    powerPreference: "high-performance"
+});
+
+renderer.setPixelRatio(
+    Math.min(window.devicePixelRatio || 1, 2)
+);
+
+container.appendChild(renderer.domElement);
+
+const geometry = new THREE.SphereGeometry(
+    GLOBE_RADIUS,
+    128,
+    96
+);
+
+const material = new THREE.MeshBasicMaterial({
+    color: 0x315b7e
+});
+
+const globe = new THREE.Mesh(
+    geometry,
+    material
+);
+
+scene.add(globe);
+
+
+// ----------------------------------------------------------
+// Subtle atmospheric halo
+// ----------------------------------------------------------
+
+const atmosphereGeometry = new THREE.SphereGeometry(
+    GLOBE_RADIUS * 1.045,
+    96,
+    64
+);
+
+const atmosphereMaterial = new THREE.ShaderMaterial({
+
+    vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+
+        void main() {
+            vec4 mvPosition = modelViewMatrix *
+                vec4(position, 1.0);
+
+            vNormal = normalize(normalMatrix * normal);
+            vViewPosition = -mvPosition.xyz;
+
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    `,
+
+    fragmentShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+
+        void main() {
+            float intensity = pow(
+                1.0 - abs(dot(
+                    normalize(vNormal),
+                    normalize(vViewPosition)
+                )),
+                3.0
+            );
+
+            gl_FragColor = vec4(
+                0.28, 0.65, 0.95,
+                intensity * 0.34
+            );
+        }
+    `,
+
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    side: THREE.BackSide,
+    depthWrite: false
+
+});
+
+const atmosphere = new THREE.Mesh(
+    atmosphereGeometry,
+    atmosphereMaterial
+);
+
+scene.add(atmosphere);
+
+
+// ----------------------------------------------------------
+// Camera controls
+// ----------------------------------------------------------
+
+const controls = new OrbitControls(
+    camera,
+    renderer.domElement
+);
+
+controls.enablePan = false;
+controls.enableDamping = true;
+
+controls.dampingFactor = 0.06;
+
+controls.minDistance = 2.7;
+controls.maxDistance = 11;
+
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.35;
+
+
+// ==========================================================
+// 4. RESPONSIVE CANVAS
+// ==========================================================
+
+function resizeGlobe() {
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    if (!width || !height) return;
+
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+        width,
+        height,
+        false
+    );
+}
+
+const resizeObserver = new ResizeObserver(
+    resizeGlobe
+);
+
+resizeObserver.observe(container);
+
+resizeGlobe();
+
+
+// ==========================================================
+// 5. COLOR PALETTE
+// ==========================================================
+
+const COLOR_STOPS = [
+
+    [-1.00, [32, 72, 140]],
+    [-0.65, [57, 118, 192]],
+    [-0.30, [173, 215, 229]],
+    [ 0.00, [240, 240, 238]],
+    [ 0.30, [245, 181, 139]],
+    [ 0.65, [217, 80, 71]],
+    [ 1.00, [129, 37, 50]]
+
+];
+
+
+function interpolateColor(value) {
+
+    const x = Math.max(
+        -1,
+        Math.min(1, value)
+    );
+
+    for (let i = 0; i < COLOR_STOPS.length - 1; i++) {
+
+        const left = COLOR_STOPS[i];
+        const right = COLOR_STOPS[i + 1];
+
+        if (x >= left[0] && x <= right[0]) {
+
+            const fraction =
+                (x - left[0]) /
+                (right[0] - left[0]);
+
+            return [0, 1, 2].map(
+                channel => Math.round(
+                    left[1][channel] * (1 - fraction)
+                    + right[1][channel] * fraction
+                )
+            );
+        }
+    }
+
+    return x < 0
+        ? COLOR_STOPS[0][1]
+        : COLOR_STOPS[COLOR_STOPS.length - 1][1];
+}
+
+
+// ==========================================================
+// 6. GEOGRAPHIC COORDINATES
+// ==========================================================
+
+function normalizeLongitude(lon) {
+
+    return (
+        (lon % 360) + 360
+    ) % 360;
+}
+
+
+function textureLongitude(u) {
+
+    return normalizeLongitude(
+        360 * (u - 0.25)
+        + CENTRAL_LONGITUDE
+    );
+}
+
+
+function geographicToTextureX(lon) {
+
+    const u =
+        0.25
+        + (lon - CENTRAL_LONGITUDE) / 360;
+
+    return (
+        ((u % 1) + 1) % 1
+    ) * TEXTURE_WIDTH;
+}
+
+
+function geographicToTextureY(lat) {
+
+    return (
+        (90 - lat) / 180
+    ) * TEXTURE_HEIGHT;
+}
+
+
+// ----------------------------------------------------------
+// Find nearest native Gaussian latitude
+// ----------------------------------------------------------
+
+function nearestLatitudeIndex(latitude) {
+
+    const array = data.lat;
+
+    let low = 0;
+    let high = array.length - 1;
+
+    while (low < high) {
+
+        const middle = Math.floor(
+            (low + high) / 2
+        );
+
+        if (array[middle] < latitude) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    if (low > 0) {
+
+        const previous = low - 1;
+
+        if (
+            Math.abs(array[previous] - latitude)
+            < Math.abs(array[low] - latitude)
+        ) {
+            return previous;
+        }
+    }
+
+    return low;
+}
+
+
+function nearestLongitudeIndex(lon) {
+
+    const longitude = normalizeLongitude(lon);
+
+    const index = Math.round(
+        longitude / (360 / data.lon.length)
+    );
+
+    return index % data.lon.length;
+}
+
+
+// ==========================================================
+// 7. DRAW GEOGRAPHIC BOUNDARIES
+// ==========================================================
+
+function strokeGeographicLines(
+    context,
+    coordinates,
+    color,
+    lineWidth
+) {
+
+    context.beginPath();
+
+    for (const line of coordinates) {
+
+        let previousX = null;
+
+        for (const point of line) {
+
+            const x = geographicToTextureX(point[0]);
+            const y = geographicToTextureY(point[1]);
+
+            if (
+                previousX === null
+                || Math.abs(x - previousX)
+                    > TEXTURE_WIDTH / 2
+            ) {
+
+                context.moveTo(x, y);
+
+            } else {
+
+                context.lineTo(x, y);
+            }
+
+            previousX = x;
+        }
+    }
+
+    context.strokeStyle = color;
+    context.lineWidth = lineWidth;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+
+    context.stroke();
+}
+
+
+function drawGeography(context) {
+
+    if (!worldTopology || !showBorders) {
+        return;
+    }
+
+    const objects = worldTopology.objects;
+
+    // Coastlines
+    const coastline = topoMesh(
+        worldTopology,
+        objects.land
+    );
+
+    strokeGeographicLines(
+        context,
+        coastline.coordinates,
+        "rgba(250, 253, 255, 0.78)",
+        1.25
+    );
+
+    // International boundaries
+    const borders = topoMesh(
+        worldTopology,
+        objects.countries,
+        (a, b) => a !== b
+    );
+
+    strokeGeographicLines(
+        context,
+        borders.coordinates,
+        "rgba(250, 253, 255, 0.48)",
+        0.85
+    );
+}
+
+
+// ==========================================================
+// 8. CREATE ATMOSPHERIC TEXTURE
+// ==========================================================
+
+function drawAtmosphericTexture() {
+
+    if (!data) return;
+
+    const textureCanvas = document.createElement("canvas");
+
+    textureCanvas.width = TEXTURE_WIDTH;
+    textureCanvas.height = TEXTURE_HEIGHT;
+
+    const context = textureCanvas.getContext("2d");
+
+    const image = context.createImageData(
+        TEXTURE_WIDTH,
+        TEXTURE_HEIGHT
+    );
+
+    // ------------------------------------------------------
+    // Precompute coordinates for visualization
+    // ------------------------------------------------------
+
+    const latitudeIndices = new Uint16Array(
+        TEXTURE_HEIGHT
+    );
+
+    const longitudeIndices = new Uint16Array(
+        TEXTURE_WIDTH
+    );
+
+    for (let y = 0; y < TEXTURE_HEIGHT; y++) {
+
+        const latitude =
+            90 - 180 * (y + 0.5) / TEXTURE_HEIGHT;
+
+        latitudeIndices[y] = nearestLatitudeIndex(
+            latitude
+        );
+    }
+
+    for (let x = 0; x < TEXTURE_WIDTH; x++) {
+
+        const longitude = textureLongitude(
+            (x + 0.5) / TEXTURE_WIDTH
+        );
+
+        longitudeIndices[x] = nearestLongitudeIndex(
+            longitude
+        );
+    }
+
+    // ------------------------------------------------------
+    // Precompute the palette
+    // ------------------------------------------------------
+
+    const palette = new Uint8Array(256 * 3);
+
+    for (let i = 0; i < 256; i++) {
+
+        const normalized =
+            -1 + 2 * i / 255;
+
+        const rgb = interpolateColor(normalized);
+
+        palette[i * 3] = rgb[0];
+        palette[i * 3 + 1] = rgb[1];
+        palette[i * 3 + 2] = rgb[2];
+    }
+
+    // ------------------------------------------------------
+    // Build texture from original Gaussian-grid values
+    // ------------------------------------------------------
+
+    for (let y = 0; y < TEXTURE_HEIGHT; y++) {
+
+        const row = data.anomaly[
+            latitudeIndices[y]
+        ];
+
+        for (let x = 0; x < TEXTURE_WIDTH; x++) {
+
+            const value = row[
+                longitudeIndices[x]
+            ];
+
+            const p = (
+                y * TEXTURE_WIDTH + x
+            ) * 4;
+
+            if (value === null || !Number.isFinite(value)) {
+
+                image.data[p] = 72;
+                image.data[p + 1] = 89;
+                image.data[p + 2] = 105;
+                image.data[p + 3] = 255;
+
+                continue;
+            }
+
+            const normalized = Math.max(
+                -1,
+                Math.min(1, value / colorRange)
+            );
+
+            const colorIndex = Math.round(
+                (normalized + 1) * 127.5
+            ) * 3;
+
+            image.data[p] = palette[colorIndex];
+
+            image.data[p + 1] = palette[
+                colorIndex + 1
+            ];
+
+            image.data[p + 2] = palette[
+                colorIndex + 2
+            ];
+
+            image.data[p + 3] = 255;
+        }
+    }
+
+    context.putImageData(image, 0, 0);
+
+    drawGeography(context);
+
+    // ------------------------------------------------------
+    // Update globe
+    // ------------------------------------------------------
+
+    const newTexture = new THREE.CanvasTexture(
+        textureCanvas
+    );
+
+    newTexture.colorSpace = THREE.SRGBColorSpace;
+
+    newTexture.wrapS = THREE.RepeatWrapping;
+    newTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+    newTexture.anisotropy = Math.min(
+        8,
+        renderer.capabilities.getMaxAnisotropy()
+    );
+
+    globe.material.map = newTexture;
+
+    globe.material.color.setHex(0xffffff);
+
+    globe.material.needsUpdate = true;
+
+    if (canvasTexture) {
+        canvasTexture.dispose();
+    }
+
+    canvasTexture = newTexture;
+}
+
+
+// ==========================================================
+// 9. LOAD DAILY CORe DATA
+// ==========================================================
+
+function validateData(json) {
+
+    if (
+        json.variable !== "t2m"
+        || json.units !== "degC"
+    ) {
+        throw new Error(
+            "Unexpected atmospheric variable or units"
+        );
+    }
+
+    if (
+        !Array.isArray(json.lat)
+        || !Array.isArray(json.lon)
+        || !Array.isArray(json.anomaly)
+    ) {
+        throw new Error(
+            "Invalid atmospheric data structure"
+        );
+    }
+
+    if (
+        json.lat.length !== 256
+        || json.lon.length !== 512
+        || json.anomaly.length !== 256
+        || json.anomaly.some(row =>
+            !Array.isArray(row)
+            || row.length !== 512
+        )
+    ) {
+        throw new Error(
+            "Unexpected CORe grid dimensions"
+        );
+    }
+
+    if (
+        !json.lat.every(Number.isFinite)
+        || !json.lon.every(Number.isFinite)
+        || !json.lat.every(
+            (v, i) => i === 0 || v > json.lat[i - 1]
+        )
+    ) {
+        throw new Error(
+            "Invalid geographical coordinates"
+        );
+    }
+}
+
+
+async function loadAtmosphericData() {
+
+    try {
+
+        const response = await fetch(
+            DATA_URL,
+            { cache: "no-store" }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Cannot load ${DATA_URL}: HTTP ${response.status}`
+            );
+        }
+
+        const json = await response.json();
+
+        validateData(json);
+
+        data = json;
+
+        // --------------------------------------------------
+        // Update date
+        // --------------------------------------------------
+
+        const date = new Date(
+            `${data.date}T12:00:00Z`
+        );
+
+        analysisDate.textContent = date.toLocaleDateString(
+            "en-US",
+            {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+                timeZone: "UTC"
+            }
+        );
+
+        // --------------------------------------------------
+        // Count valid values
+        // --------------------------------------------------
+
+        let validPoints = 0;
+
+        for (const row of data.anomaly) {
+
+            for (const value of row) {
+
+                if (
+                    value !== null
+                    && Number.isFinite(value)
+                ) {
+                    validPoints++;
+                }
+            }
+        }
+
+        gridPoints.textContent =
+            validPoints.toLocaleString("en-US");
+
+        drawAtmosphericTexture();
+
+        status.textContent = `CORe · ${data.date}`;
+
+        loading.style.display = "none";
+
+        console.log(
+            "Global Atmospheric Monitor: atmospheric data loaded",
+            data.date
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
+        loading.style.display = "none";
+
+        status.textContent = "Data unavailable";
+
+        errorBox.style.display = "block";
+
+        errorBox.textContent =
+            "Unable to load atmospheric data. " +
+            error.message;
+    }
+}
+
+
+// ==========================================================
+// 10. LOAD GEOGRAPHIC BOUNDARIES
+// ==========================================================
+
+async function loadGeography() {
+
+    try {
+
+        const response = await fetch(WORLD_URL);
+
+        if (!response.ok) {
+            throw new Error(
+                `World Atlas HTTP ${response.status}`
+            );
+        }
+
+        worldTopology = await response.json();
+
+        if (
+            !worldTopology.objects?.land
+            || !worldTopology.objects?.countries
+        ) {
+            throw new Error(
+                "Unexpected World Atlas structure"
+            );
+        }
+
+        if (data) {
+            drawAtmosphericTexture();
+        }
+
+    } catch (error) {
+
+        // The globe remains available even if geographic
+        // boundaries cannot be loaded.
+
+        console.warn(
+            "Geographic boundaries unavailable:",
+            error
+        );
+    }
+}
+
+
+// ==========================================================
+// 11. MOUSE INSPECTION
+// ==========================================================
+
+const raycaster = new THREE.Raycaster();
+
+const pointer = new THREE.Vector2();
+
+
+renderer.domElement.addEventListener(
+    "pointermove",
+    event => {
+
+        if (!data) return;
+
+        const rect = (
+            renderer.domElement.getBoundingClientRect()
+        );
+
+        pointer.x = (
+            (event.clientX - rect.left)
+            / rect.width
+        ) * 2 - 1;
+
+        pointer.y = -(
+            (event.clientY - rect.top)
+            / rect.height
+        ) * 2 + 1;
+
+        raycaster.setFromCamera(
+            pointer,
+            camera
+        );
+
+        const intersections = (
+            raycaster.intersectObject(globe)
+        );
+
+        if (!intersections.length) {
+
+            hoverValue.textContent = "Move over globe";
+
+            hoverLocation.textContent =
+                "Latitude · Longitude";
+
+            return;
+        }
+
+        const uv = intersections[0].uv;
+
+        const longitude = textureLongitude(
+            uv.x
+        );
+
+        const latitude = (
+            uv.y * 180 - 90
+        );
+
+        const i = nearestLatitudeIndex(
+            latitude
+        );
+
+        const j = nearestLongitudeIndex(
+            longitude
+        );
+
+        const value = data.anomaly[i][j];
+
+        hoverValue.textContent = (
+            value !== null && Number.isFinite(value)
+                ? `${value >= 0 ? "+" : ""}${value.toFixed(2)} °C`
+                : "No data"
+        );
+
+        const latitudeLabel =
+            `${Math.abs(latitude).toFixed(2)}°` +
+            (latitude >= 0 ? "N" : "S");
+
+        const signedLongitude =
+            longitude > 180
+                ? longitude - 360
+                : longitude;
+
+        const longitudeLabel =
+            `${Math.abs(signedLongitude).toFixed(2)}°` +
+            (signedLongitude >= 0 ? "E" : "W");
+
+        hoverLocation.textContent =
+            `${latitudeLabel} · ${longitudeLabel}`;
+    }
+);
+
+
+// ==========================================================
+// 12. INTERACTIVE CONTROLS
+// ==========================================================
+
+rotationButton.addEventListener(
+    "click",
+    () => {
+
+        autoRotate = !autoRotate;
+
+        controls.autoRotate = autoRotate;
+
+        rotationButton.textContent = autoRotate
+            ? "Pause rotation"
+            : "Resume rotation";
+    }
+);
+
+
+bordersButton.addEventListener(
+    "click",
+    () => {
+
+        showBorders = !showBorders;
+
+        bordersButton.textContent = showBorders
+            ? "Hide borders"
+            : "Show borders";
+
+        drawAtmosphericTexture();
+    }
+);
+
+
+resetButton.addEventListener(
+    "click",
+    () => {
+
+        camera.position.set(0, 0, 6.5);
+
+        controls.target.set(0, 0, 0);
+
+        controls.update();
+    }
+);
+
+
+function formatTick(value) {
+
+    if (value === 0) return "0";
+
+    return (
+        value > 0 ? "+" : "−"
+    ) + Math.abs(value);
+}
+
+
+function updateLegend() {
+
+    rangeLabel.textContent = `±${colorRange} °C`;
+
+    document.getElementById(
+        "tick-left"
+    ).textContent = formatTick(-colorRange);
+
+    document.getElementById(
+        "tick-midleft"
+    ).textContent = formatTick(-colorRange / 2);
+
+    document.getElementById(
+        "tick-midright"
+    ).textContent = formatTick(colorRange / 2);
+
+    document.getElementById(
+        "tick-right"
+    ).textContent = formatTick(colorRange);
+}
+
+
+rangeInput.addEventListener(
+    "input",
+    event => {
+
+        colorRange = Number(
+            event.target.value
+        );
+
+        updateLegend();
+
+        drawAtmosphericTexture();
+    }
+);
+
+
+// ==========================================================
+// 13. ANIMATION
+// ==========================================================
+
+function animate() {
+
+    requestAnimationFrame(animate);
+
+    controls.update();
+
+    renderer.render(
+        scene,
+        camera
+    );
+}
+
+animate();
+
+
+// ==========================================================
+// 14. INITIALIZE
+// ==========================================================
+
+updateLegend();
+
+loadAtmosphericData();
+loadGeography();
+
+</script>
 
 </body>
 </html>
