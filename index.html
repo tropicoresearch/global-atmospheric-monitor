@@ -1109,11 +1109,9 @@ function drawDirectionMark(ctx, points, shift, width) {
     ctx.lineTo(x-dx*head*0.44-dy*half,y-dy*head*0.44+dx*half);
     ctx.moveTo(x+dx*head*0.48,y+dy*head*0.48);
     ctx.lineTo(x-dx*head*0.44+dy*half,y-dy*head*0.44-dx*half);
-    ctx.strokeStyle = "rgba(255,255,255,0.92)";
-    ctx.lineWidth = 3.0*width;
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(8,34,56,0.95)";
-    ctx.lineWidth = 1.6*width;
+    // Single, subtle directional mark, matching the streamline.
+    ctx.strokeStyle = "rgba(12,45,72,0.88)";
+    ctx.lineWidth = 1.35*width;
     ctx.stroke();
 }
 
@@ -1128,11 +1126,9 @@ function paintStreamline(ctx, points, width) {
         }
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        ctx.strokeStyle = "rgba(255,255,255,0.78)";
-        ctx.lineWidth = 3.25*width;
-        ctx.stroke();
-        ctx.strokeStyle = "rgba(8,39,64,0.89)";
-        ctx.lineWidth = 1.55*width;
+        // Single dark-petrol stroke: no white underlay or halo.
+        ctx.strokeStyle = "rgba(12,45,72,0.88)";
+        ctx.lineWidth = 1.45*width;
         ctx.stroke();
         drawDirectionMark(ctx,path,shift,width);
     }
