@@ -69,16 +69,7 @@ h1 { font-size: clamp(30px, 4vw, 49px); font-weight: 650; letter-spacing: -1.5px
     background: radial-gradient(ellipse at 50% 46%, #244c70 0%, #102e4b 47%, #071b31 100%);
 }
 #globe { position: absolute; inset: 0; width: 100%; height: 100%; }
-/* Geographic wind quiver, resampled on the visible globe at uniform screen spacing. */
-#wind-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    width: 100%;
-    height: 100%;
-    display: block;
-    pointer-events: none;
-}
+/* Wind streamlines are drawn as a transparent texture on a second sphere. */
 #globe canvas { display: block; width: 100%; height: 100%; }
 .sidebar {
     position: absolute;
@@ -275,16 +266,13 @@ footer a { color: var(--blue); text-decoration: none; }
 .method-links { display: flex; gap: 15px; flex-wrap: wrap; }
 .method-links a, .method-credit a { color: var(--blue); text-decoration: none; font-weight: 600; }
 .method-credit { font-size: 11px; line-height: 1.7; color: var(--muted); margin-top: 17px; }
-/* Optional static wind-vector controls */
+/* Optional stationary wind-streamline controls */
 .sidebar-section[hidden], .separator[hidden] { display: none !important; }
 .wind-check { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .wind-check input { accent-color: var(--blue); }
 .wind-range-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; margin-top: 15px; }
 .wind-range-label span { color: var(--navy); font-weight: 650; }
 .wind-caption { color: var(--muted); font-size: 10px; line-height: 1.6; margin: 8px 0 0; }
-.wind-reference { display: flex; align-items: center; gap: 10px; color: var(--navy); font-size: 11px; margin-top: 12px; }
-.wind-reference canvas { display: block; width: 100px; height: 28px; }
-.wind-reference span { font-weight: 600; white-space: nowrap; }
 .wind-caption strong { color: var(--navy); }
 @media (max-width: 700px) { .method-grid { grid-template-columns: 1fr; } }
 
@@ -380,29 +368,25 @@ footer a { color: var(--blue); text-decoration: none; }
             </div>
             <hr class="separator" id="wind-separator" hidden>
             <div class="sidebar-section" id="wind-section" hidden>
-                <div class="section-title">Daily-mean wind vectors</div>
+                <div class="section-title">Daily-mean wind streamlines</div>
                 <label class="wind-check" for="wind-toggle">
                     <input id="wind-toggle" type="checkbox" checked>
-                    <span>Show wind arrows</span>
+                    <span>Show streamlines</span>
                 </label>
                 <label class="wind-range-label" for="wind-density">
-                    Arrow density <span id="wind-density-value">Medium · 22 px</span>
+                    Streamline density <span id="wind-density-value">Medium</span>
                 </label>
-                <input id="wind-density" type="range" min="0" max="100" value="64" step="1"
-                       aria-label="Wind arrow density" aria-describedby="wind-density-help">
-                <p class="wind-caption" id="wind-density-help">Spacing between arrows on the visible globe.</p>
+                <input id="wind-density" type="range" min="0" max="100" value="50" step="1"
+                       aria-label="Wind streamline density" aria-describedby="wind-density-help">
+                <p class="wind-caption" id="wind-density-help">Number of geographically fixed streamline seeds, distributed globally.</p>
                 <label class="wind-range-label" for="wind-size">
-                    Arrow size <span id="wind-size-value">100%</span>
+                    Line width <span id="wind-size-value">100%</span>
                 </label>
-                <input id="wind-size" type="range" min="50" max="170" value="100" step="5"
-                       aria-label="Wind arrow size">
-                <div class="wind-reference" aria-label="Wind speed reference">
-                    <canvas id="wind-reference-canvas" width="100" height="28" aria-hidden="true"></canvas>
-                    <span id="wind-reference-label">10 m/s</span>
-                </div>
-                <p class="wind-caption" id="wind-status" aria-live="polite">Wind layer ready to load.</p>
-                <p class="wind-caption" id="wind-visible-count">Visible arrows: —</p>
-                <p class="wind-caption">Arrows represent the <strong>original daily-mean wind</strong>, not anomalies. Arrow length is proportional to wind speed; the background colors show wind-speed anomalies.</p>
+                <input id="wind-size" type="range" min="60" max="180" value="100" step="5"
+                       aria-label="Streamline line width">
+<p class="wind-caption" id="wind-status" aria-live="polite">Wind layer ready to load.</p>
+                <p class="wind-caption" id="wind-visible-count">Streamlines: —</p>
+                <p class="wind-caption">Stationary streamlines follow the direction of the <strong>original daily-mean wind</strong>, not anomalies. Small markers indicate flow direction. Line length is illustrative; background colors show wind-speed anomalies.</p>
             </div>
             <hr class="separator">
             <div class="sidebar-section">
@@ -414,7 +398,6 @@ footer a { color: var(--blue); text-decoration: none; }
 
         <section class="viewer" id="viewer" aria-label="Interactive 3D atmospheric globe">
             <div id="globe"></div>
-            <canvas id="wind-overlay" aria-hidden="true"></canvas>
             <div class="viewer-heading">
                 <h2 id="viewer-title">Global Temperature Anomalies</h2>
                 <p>NOAA CPC CORe · Daily analysis</p>
@@ -484,7 +467,7 @@ footer a { color: var(--blue); text-decoration: none; }
             <article class="method-card">
                 <h3>Latest common date &amp; wind display</h3>
                 <p>The monitor selects the <strong>most recent day for which all required FLX and PGB fields are available</strong>. All displayed anomalies therefore share one analysis date, shown above the globe. Products may lag the current day as NOAA updates its archive.</p>
-                <p>On wind-speed maps, optional <strong>stationary quiver arrows</strong> show the direction and magnitude of the original daily-mean U and V wind fields at 850 or 250 hPa. Arrows are sampled at approximately uniform spacing on the visible globe; their lengths are proportional to wind speed, with a level-specific reference arrow. The size control changes the graphical scale. Background colors represent wind-speed anomalies, independently of the arrows.</p>
+                <p>On wind-speed maps, optional <strong>stationary streamlines</strong> follow the original daily-mean U and V wind fields at 850 or 250 hPa. The curves are integrated over a fixed daily-mean vector field on the sphere, and do not represent time-dependent air-parcel trajectories. Small embedded marks indicate the direction of flow. Their lengths and line widths are graphical choices, not measures of wind speed. Background colors independently represent wind-speed anomalies.</p>
             </article>
         </div>
         <p class="method-credit">Source acknowledgement: NOAA / NCEP / CPC CORe; EMC and PSL collaborating institutions. Scientific processing and web visualization: Global Atmospheric Monitor, an independent TRÓPICO initiative.</p>
@@ -628,9 +611,6 @@ let canvasTexture = null;
 let loadSequence = 0;
 const savedRanges = {};
 const container = $("globe");
-const windCanvas = $("wind-overlay");
-const windContext = windCanvas.getContext("2d", {alpha: true});
-let windLayerInitialized = false;
 const variableSelect = $("variable-select");
 const rangeInput = $("color-range");
 const status = $("status");
@@ -715,10 +695,6 @@ function resizeGlobe() {
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     renderer.setSize(width, height, false);
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    windCanvas.width = Math.round(width * pixelRatio);
-    windCanvas.height = Math.round(height * pixelRatio);
-    windContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     controls.target.set(0, 0, 0);
     const distance = idealCameraDistance();
     controls.minDistance = Math.max(3.0, distance * 0.75);
@@ -727,8 +703,6 @@ function resizeGlobe() {
         camera.position.setLength(distance);
     }
     controls.update();
-    // Resample on the new visible globe footprint after a resize.
-    if (windLayerInitialized) requestWindRedraw();
 }
 new ResizeObserver(resizeGlobe).observe(container);
 resizeGlobe();
@@ -942,12 +916,12 @@ function updateVariableInterface() {
 
 
 // ==========================================================
-// WIND QUIVER: ORIGINAL DAILY-MEAN VECTORS, NOT ANOMALIES
-// Sampling is uniformly spaced in screen pixels on the visible
-// hemisphere. Wind direction is projected from the geographic
-// east/north tangent plane into the current 3D camera view.
-// Arrow length is proportional to daily-mean wind speed.
+// STATIONARY WIND STREAMLINES, FIXED IN GEOGRAPHIC SPACE
 // ==========================================================
+// NOAA CORe U/V are the daily-mean eastward/northward wind components.
+// Curves are constructed on the sphere once per level/density change.
+// Camera motion does NOT recompute seeds or trajectories.
+// The separate transparent sphere follows exactly the main globe UVs.
 
 const windSection = $("wind-section");
 const windSeparator = $("wind-separator");
@@ -956,27 +930,38 @@ const windDensity = $("wind-density");
 const windSize = $("wind-size");
 const windStatus = $("wind-status");
 const windCount = $("wind-visible-count");
-const windReferenceCanvas = $("wind-reference-canvas");
-const windReferenceContext = windReferenceCanvas.getContext("2d");
 const windCache = {};
-const RADIANS = Math.PI / 180;
-const DEGREES = 180 / Math.PI;
-const WIND_REFERENCE_SPEED = {850: 10, 250: 30}; // m/s
-const WIND_STYLE = {
-    halo: "rgba(255,255,255,0.68)",
-    ink: "rgba(20,53,80,0.97)"
-};
-const earthSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), GLOBE_RADIUS);
-const windRaycaster = new THREE.Raycaster();
-const windNDC = new THREE.Vector2();
-const windHit = new THREE.Vector3();
-const windProbe = new THREE.Vector3();
-const windTangent = new THREE.Vector3();
+const RAD = Math.PI / 180;
+const DEG = 180 / Math.PI;
+
+const streamlineCanvas = document.createElement("canvas");
+streamlineCanvas.width = TEXTURE_WIDTH;
+streamlineCanvas.height = TEXTURE_HEIGHT;
+const streamlineContext = streamlineCanvas.getContext("2d", {alpha: true});
+const streamlineTexture = new THREE.CanvasTexture(streamlineCanvas);
+streamlineTexture.colorSpace = THREE.SRGBColorSpace;
+streamlineTexture.wrapS = THREE.RepeatWrapping;
+streamlineTexture.wrapT = THREE.ClampToEdgeWrapping;
+streamlineTexture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+const streamlineSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(GLOBE_RADIUS * 1.004, 128, 96),
+    new THREE.MeshBasicMaterial({
+        map: streamlineTexture,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+        depthTest: true,
+        side: THREE.FrontSide
+    })
+);
+streamlineSphere.visible = false;
+streamlineSphere.renderOrder = 2;
+scene.add(streamlineSphere);
 
 let windField = null;
 let windFetchSequence = 0;
-let windDrawPending = false;
-let windLastDraw = 0;
+let streamlineBuildTimer = null;
 
 function windLevelForVariable(variable) {
     if (variable === "wspd850") return 850;
@@ -984,191 +969,207 @@ function windLevelForVariable(variable) {
     return null;
 }
 
-function clearWindArrows() {
-    windContext.clearRect(0, 0, container.clientWidth, container.clientHeight);
-    windCount.textContent = "Visible arrows: —";
+function clearWindStreamlines() {
+    streamlineSphere.visible = false;
+    streamlineContext.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+    streamlineTexture.needsUpdate = true;
+    windCount.textContent = "Streamlines: —";
 }
 
-// Bilinear interpolation in the native 256 x 512 Gaussian grid.
-// The longitude axis is 0...360 with cyclic wrap.
+// Bilinear interpolation on CORe's native 256 x 512 Gaussian grid.
+// Longitude wraps cyclically, and the grid latitude is ascending.
 function windAt(lon, lat) {
-    if (!windField) return null;
+    if (!windField || !Number.isFinite(lat) || Math.abs(lat) >= 86) return null;
     const lats = windField.lat;
     const nlat = lats.length;
     const nlon = windField.lon.length;
     let low = 0, high = nlat - 1;
     while (low < high) {
-        const middle = (low + high) >> 1;
-        if (lats[middle] < lat) low = middle + 1;
-        else high = middle;
+        const mid = (low + high) >> 1;
+        if (lats[mid] < lat) low = mid + 1;
+        else high = mid;
     }
     const i1 = Math.min(Math.max(low, 1), nlat - 1);
     const i0 = i1 - 1;
-    const fy = Math.max(0, Math.min(1, (lat-lats[i0])/(lats[i1]-lats[i0])));
-    const step = 360 / nlon;
+    const fy = THREE.MathUtils.clamp((lat-lats[i0])/(lats[i1]-lats[i0]), 0, 1);
+    const dlon = 360/nlon;
     const longitude = normalizeLongitude(lon);
-    const j0 = Math.floor(longitude / step) % nlon;
-    const j1 = (j0 + 1) % nlon;
-    const fx = (longitude-j0*step) / step;
-
-    function interpolate(grid) {
+    const j0 = Math.floor(longitude/dlon)%nlon;
+    const j1 = (j0+1)%nlon;
+    const fx = (longitude-j0*dlon)/dlon;
+    const bilinear = grid => {
         const a = grid[i0][j0], b = grid[i0][j1];
         const c = grid[i1][j0], d = grid[i1][j1];
-        if (a === null || b === null || c === null || d === null) return null;
-        if (![a, b, c, d].every(Number.isFinite)) return null;
-        return (1-fy)*((1-fx)*a + fx*b) + fy*((1-fx)*c + fx*d);
-    }
-    const u = interpolate(windField.u);
-    const v = interpolate(windField.v);
+        if (![a,b,c,d].every(Number.isFinite)) return null;
+        return (1-fy)*((1-fx)*a+fx*b)+fy*((1-fx)*c+fx*d);
+    };
+    const u = bilinear(windField.u);
+    const v = bilinear(windField.v);
     return u === null || v === null ? null : {u, v};
 }
 
-// Inverse projection of a pixel onto the front surface of the globe.
-// The intersection of the camera ray and the sphere automatically
-// eliminates the hidden hemisphere, without clustering at the rim.
-function screenToWindPoint(x, y, width, height) {
-    windNDC.set(2*x/width - 1, 1 - 2*y/height);
-    windRaycaster.setFromCamera(windNDC, camera);
-    return windRaycaster.ray.intersectSphere(earthSphere, windHit);
+// Fixed-distance integration of a streamline on the sphere.
+// A midpoint (RK2) direction is used, with a 0.46 degree arc step.
+// Normalizing U/V only sets sampling distance, not a wind-speed scale.
+function followWind(point, direction) {
+    const field = windAt(point.lon, point.lat);
+    if (!field) return null;
+    const speed = Math.hypot(field.u, field.v);
+    if (speed < 0.65) return null;
+
+    const angle = 0.46;
+    const midLat = point.lat + direction*angle*0.5*field.v/speed;
+    const cos0 = Math.cos(point.lat*RAD);
+    if (Math.abs(cos0) < 0.09 || Math.abs(midLat) >= 85) return null;
+    const midLon = normalizeLongitude(
+        point.lon + direction*angle*0.5*field.u/(speed*cos0)
+    );
+    const midpointField = windAt(midLon, midLat);
+    if (!midpointField) return null;
+    const midSpeed = Math.hypot(midpointField.u, midpointField.v);
+    if (midSpeed < 0.65) return null;
+    const cosMid = Math.cos(midLat*RAD);
+    if (Math.abs(cosMid) < 0.09) return null;
+    const lat = point.lat + direction*angle*midpointField.v/midSpeed;
+    const lon = normalizeLongitude(
+        point.lon + direction*angle*midpointField.u/(midSpeed*cosMid)
+    );
+    if (Math.abs(lat) >= 84 || !Number.isFinite(lon)) return null;
+    return {lon, lat};
 }
 
-// The legend and the map share exactly the same arrow-length scale.
-// Moving the density slider to the right decreases the pixel spacing.
-function windSpacing() {
-    return Math.round(38 - 25*Number(windDensity.value)/100);
-}
-
-function windReferenceLength(spacing) {
-    return Math.min(24, spacing * 0.95) * Number(windSize.value) / 100;
-}
-
-function drawQuiverArrow(ctx, x, y, dx, dy, length) {
-    if (!Number.isFinite(length) || length < 2.5) return;
-    const half = length / 2;
-    const x0 = x - dx*half, y0 = y - dy*half;
-    const x1 = x + dx*half, y1 = y + dy*half;
-    const head = Math.min(6.0, Math.max(2.4, length*0.32));
-    const wing = head * 0.43;
-    const bx = x1 - dx*head, by = y1 - dy*head;
-    const px = -dy, py = dx;
-
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.strokeStyle = WIND_STYLE.halo;
-    ctx.lineWidth = 2.4;
-    ctx.stroke();
-    ctx.strokeStyle = WIND_STYLE.ink;
-    ctx.lineWidth = 1.25;
-    ctx.stroke();
-
-    // A small filled triangular head, as in a conventional quiver plot.
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(bx + px*wing, by + py*wing);
-    ctx.lineTo(bx - px*wing, by - py*wing);
-    ctx.closePath();
-    ctx.fillStyle = WIND_STYLE.ink;
-    ctx.fill();
-}
-
-function drawWindReference(level, spacing) {
-    const ctx = windReferenceContext;
-    const width = 100, height = 28;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    windReferenceCanvas.width = Math.round(width*dpr);
-    windReferenceCanvas.height = Math.round(height*dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    const length = windReferenceLength(spacing);
-    drawQuiverArrow(ctx, 12+length/2, 14, 1, 0, length);
-    $("wind-reference-label").textContent = `${WIND_REFERENCE_SPEED[level]} m/s`;
-}
-
-function drawWindArrows() {
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    windContext.clearRect(0, 0, width, height);
-    const level = windLevelForVariable(activeVariable);
-    if (!windField || !windToggle.checked || !level || !width || !height) return;
-
-    camera.updateMatrixWorld();
-    const spacing = windSpacing();
-    const lengthScale = windReferenceLength(spacing)/WIND_REFERENCE_SPEED[level];
-    const distance = camera.position.length();
-    const focal = height / (2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2)));
-    const projectedRadius = focal*GLOBE_RADIUS/Math.sqrt(distance*distance-GLOBE_RADIUS*GLOBE_RADIUS);
-    const cx = width/2, cy = height/2;
-    const radiusSquared = projectedRadius*projectedRadius;
-    const firstX = Math.max(spacing/2, cx-Math.ceil(projectedRadius/spacing)*spacing);
-    const firstY = Math.max(spacing/2, cy-Math.ceil(projectedRadius/spacing)*spacing);
-    const lastX = Math.min(width, cx+projectedRadius);
-    const lastY = Math.min(height, cy+projectedRadius);
-    let count = 0;
-
-    // Constant pixel spacing: higher density is *really* higher density
-    // on the visible portion, rather than wasted on the far hemisphere.
-    for (let y=firstY; y<lastY; y+=spacing) {
-        for (let x=firstX; x<lastX; x+=spacing) {
-            const dxCenter = x-cx, dyCenter = y-cy;
-            if (dxCenter*dxCenter+dyCenter*dyCenter >= radiusSquared) continue;
-            const point = screenToWindPoint(x, y, width, height);
-            if (!point) continue;
-
-            const latitude = Math.asin(THREE.MathUtils.clamp(point.y/GLOBE_RADIUS, -1, 1));
-            const phi = Math.atan2(point.x, point.z);
-            const longitude = normalizeLongitude(CENTRAL_LONGITUDE+phi*DEGREES);
-            const vector = windAt(longitude, latitude*DEGREES);
-            if (!vector) continue;
-            const speed = Math.hypot(vector.u, vector.v);
-            if (speed < 0.7) continue;
-
-            const length = speed*lengthScale;
-            if (length < 2.5) continue;
-            // Keep all of each arrow inside the visible globe silhouette.
-            if (Math.hypot(dxCenter, dyCenter)+length*0.5+3 > projectedRadius) continue;
-
-            const cosPhi=Math.cos(phi), sinPhi=Math.sin(phi);
-            const sinLat=Math.sin(latitude), cosLat=Math.cos(latitude);
-            // Basis: east=(cos(phi),0,-sin(phi));
-            // north=(-sin(lat)*sin(phi),cos(lat),-sin(lat)*cos(phi)).
-            windTangent.set(
-                (vector.u*cosPhi-vector.v*sinLat*sinPhi)/speed,
-                (vector.v*cosLat)/speed,
-                (-vector.u*sinPhi-vector.v*sinLat*cosPhi)/speed
-            );
-            // Project a short tangent-plane probe to obtain the screen
-            // direction, preserving orientation at any globe rotation.
-            windProbe.copy(point).addScaledVector(windTangent, 0.06).project(camera);
-            const sx = (windProbe.x*0.5+0.5)*width-x;
-            const sy = (-windProbe.y*0.5+0.5)*height-y;
-            const norm = Math.hypot(sx,sy);
-            if (norm < 0.02) continue;
-            drawQuiverArrow(windContext,x,y,sx/norm,sy/norm,length);
-            count++;
+function traceStreamline(seed) {
+    const backward = [];
+    const forward = [];
+    for (const [direction, output] of [[-1, backward], [1, forward]]) {
+        let point = seed;
+        for (let i=0; i<27; i++) {
+            const next = followWind(point, direction);
+            if (!next) break;
+            output.push(next);
+            point = next;
         }
     }
-    windCount.textContent = `Visible arrows: ${count.toLocaleString("en-US")}`;
-    drawWindReference(level, spacing);
+    return [...backward.reverse(), seed, ...forward];
 }
 
-// Rate-limit quiver resampling during autorotation or dragging.
-// The final camera position is always drawn after the last change.
-function requestWindRedraw() {
-    if (windDrawPending) return;
-    windDrawPending = true;
-    const drawWhenReady = time => {
-        if (time-windLastDraw < 32) {
-            requestAnimationFrame(drawWhenReady);
-            return;
+// Fibonacci sampling: approximately equal-area, camera-independent seeds.
+// When density changes we regenerate the curves; rotation never does.
+function streamlineSeedCount() {
+    return Math.round(180 + 2220*Math.pow(Number(windDensity.value)/100, 1.8));
+}
+
+function buildStreamlineSeeds(count) {
+    const goldenAngle = Math.PI*(3-Math.sqrt(5));
+    const seeds = [];
+    for (let k=0; k<count; k++) {
+        const z = 1-2*(k+0.5)/count;
+        const lat = Math.asin(z)*DEG;
+        if (Math.abs(lat)>80) continue;
+        const lon = normalizeLongitude((k*goldenAngle)*DEG+21);
+        seeds.push({lon,lat});
+    }
+    return seeds;
+}
+
+// Convert geographic points to an unwrapped continuous horizontal path.
+// Repeating by ± one texture width makes the date-line seam continuous.
+function texturePath(points) {
+    const output = [];
+    let offset = 0;
+    let previous = null;
+    for (const point of points) {
+        const x = geographicToTextureX(point.lon);
+        if (previous !== null) {
+            if (x-previous > TEXTURE_WIDTH/2) offset -= TEXTURE_WIDTH;
+            else if (x-previous < -TEXTURE_WIDTH/2) offset += TEXTURE_WIDTH;
         }
-        windDrawPending = false;
-        windLastDraw = time;
-        drawWindArrows();
-    };
-    requestAnimationFrame(drawWhenReady);
+        output.push({x:x+offset, y:geographicToTextureY(point.lat)});
+        previous = x;
+    }
+    return output;
+}
+
+// A discreet directional chevron is embedded in each streamline.
+// It indicates the local downstream direction without a quiver overlay.
+function drawDirectionMark(ctx, points, shift, width) {
+    if (points.length < 12) return;
+    const i = Math.floor(points.length*0.67);
+    const before = points[Math.max(0,i-2)];
+    const after = points[Math.min(points.length-1,i+2)];
+    const vx = after.x-before.x, vy = after.y-before.y;
+    const n = Math.hypot(vx,vy);
+    if (n < 0.1) return;
+    const dx = vx/n, dy = vy/n;
+    const x = points[i].x+shift, y = points[i].y;
+    const head = 5.0*width;
+    const half = 2.0*width;
+    ctx.beginPath();
+    ctx.moveTo(x+dx*head*0.48,y+dy*head*0.48);
+    ctx.lineTo(x-dx*head*0.44-dy*half,y-dy*head*0.44+dx*half);
+    ctx.moveTo(x+dx*head*0.48,y+dy*head*0.48);
+    ctx.lineTo(x-dx*head*0.44+dy*half,y-dy*head*0.44-dx*half);
+    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = 3.0*width;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(8,34,56,0.95)";
+    ctx.lineWidth = 1.6*width;
+    ctx.stroke();
+}
+
+function paintStreamline(ctx, points, width) {
+    if (points.length < 9) return;
+    const path = texturePath(points);
+    for (const shift of [-TEXTURE_WIDTH,0,TEXTURE_WIDTH]) {
+        ctx.beginPath();
+        ctx.moveTo(path[0].x+shift,path[0].y);
+        for (let i=1;i<path.length;i++) {
+            ctx.lineTo(path[i].x+shift,path[i].y);
+        }
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(255,255,255,0.78)";
+        ctx.lineWidth = 3.25*width;
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(8,39,64,0.89)";
+        ctx.lineWidth = 1.55*width;
+        ctx.stroke();
+        drawDirectionMark(ctx,path,shift,width);
+    }
+}
+
+function rebuildStreamlines() {
+    if (!windField || !windToggle.checked || !windLevelForVariable(activeVariable)) {
+        clearWindStreamlines();
+        return;
+    }
+    const ctx = streamlineContext;
+    ctx.clearRect(0,0,TEXTURE_WIDTH,TEXTURE_HEIGHT);
+    const width = Number(windSize.value)/100;
+    const count = streamlineSeedCount();
+    const seeds = buildStreamlineSeeds(count);
+    let drawn = 0;
+    for (const seed of seeds) {
+        const field = windAt(seed.lon,seed.lat);
+        if (!field || Math.hypot(field.u,field.v)<0.65) continue;
+        const path = traceStreamline(seed);
+        if (path.length < 9) continue;
+        paintStreamline(ctx,path,width);
+        drawn++;
+    }
+    streamlineTexture.needsUpdate = true;
+    streamlineSphere.visible = true;
+    windCount.textContent = `Global streamlines: ${drawn.toLocaleString("en-US")}`;
+    const level = windLevelForVariable(activeVariable);
+    windStatus.textContent = `${level}-hPa stationary daily-mean flow · ${manifest.date}`;
+}
+
+function scheduleStreamlineRebuild() {
+    if (streamlineBuildTimer !== null) clearTimeout(streamlineBuildTimer);
+    streamlineBuildTimer = setTimeout(() => {
+        streamlineBuildTimer = null;
+        rebuildStreamlines();
+    }, 80);
 }
 
 function validateWindProduct(wind, name) {
@@ -1181,7 +1182,7 @@ function validateWindProduct(wind, name) {
         !Array.isArray(wind.v) || wind.v.length !== 256 ||
         wind.u.some(row => !Array.isArray(row) || row.length !== 512) ||
         wind.v.some(row => !Array.isArray(row) || row.length !== 512)) {
-        throw new Error(`Invalid wind-vector product ${name}`);
+        throw new Error(`Invalid wind product ${name}`);
     }
     if (data && (!wind.lat.every((x,i) => Math.abs(x-data.lat[i])<1e-4) ||
                  !wind.lon.every((x,i) => Math.abs(x-data.lon[i])<1e-4))) {
@@ -1194,58 +1195,56 @@ async function synchronizeWindLayer() {
     const level = windLevelForVariable(activeVariable);
     windSection.hidden = level === null;
     windSeparator.hidden = level === null;
+    streamlineSphere.visible = false;
+    windCount.textContent = "Streamlines: —";
     windField = null;
-    clearWindArrows();
     if (level === null) return;
     if (!windToggle.checked) {
-        windStatus.textContent = "Wind arrows hidden.";
+        windStatus.textContent = "Streamlines hidden.";
         return;
     }
     const name = `wind${level}`;
     if (!manifest.wind_layers?.includes(name)) {
-        windStatus.textContent = "Wind vectors have not yet been published.";
+        windStatus.textContent = "Wind products have not yet been published.";
         return;
     }
-    windStatus.textContent = `Loading ${level}-hPa wind vectors...`;
+    windStatus.textContent = `Loading ${level}-hPa daily-mean wind...`;
     try {
         if (!windCache[name]) {
             const version = encodeURIComponent(manifest.generated_utc || manifest.date);
-            const response = await fetch(`${DATA_BASE}${name}.json?v=${version}`, {cache:"no-store"});
+            const response = await fetch(`${DATA_BASE}${name}.json?v=${version}`,{cache:"no-store"});
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const wind = await response.json();
             if (request !== windFetchSequence) return;
-            validateWindProduct(wind, name);
+            validateWindProduct(wind,name);
             windCache[name] = wind;
         }
-        if (request !== windFetchSequence || windLevelForVariable(activeVariable) !== level) return;
+        if (request !== windFetchSequence || windLevelForVariable(activeVariable)!==level) return;
         windField = windCache[name];
-        requestWindRedraw();
-        windStatus.textContent = `${level}-hPa daily-mean vectors · ${manifest.date}`;
+        rebuildStreamlines();
     } catch (error) {
         if (request !== windFetchSequence) return;
-        windStatus.textContent = `Wind layer unavailable (${error.message}).`;
+        windStatus.textContent = `Streamlines unavailable (${error.message}).`;
         console.warn(error);
     }
 }
 
 function updateWindDensityLabel() {
-    const spacing = windSpacing();
-    const density = spacing <= 17 ? "High" : spacing <= 26 ? "Medium" : "Low";
-    $("wind-density-value").textContent = `${density} · ${spacing} px`;
+    const value = Number(windDensity.value);
+    const density = value <= 32 ? "Low" : value < 70 ? "Medium" : "High";
+    $("wind-density-value").textContent = `${density} · ${streamlineSeedCount().toLocaleString("en-US")} seeds`;
 }
 
 windToggle.addEventListener("change", synchronizeWindLayer);
 windDensity.addEventListener("input", () => {
     updateWindDensityLabel();
-    requestWindRedraw();
+    scheduleStreamlineRebuild();
 });
 windSize.addEventListener("input", () => {
     $("wind-size-value").textContent = `${windSize.value}%`;
-    requestWindRedraw();
+    scheduleStreamlineRebuild();
 });
 updateWindDensityLabel();
-windLayerInitialized = true;
-controls.addEventListener("change", requestWindRedraw);
 
 // ==========================================================
 // 7. DOWNLOAD AND CHECK PRODUCTS
